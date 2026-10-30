@@ -1,4 +1,5 @@
 using Erp.Core.Domain.Data;
+using Erp.Core.Infrastructure.Documents;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 
@@ -19,6 +20,15 @@ public sealed class PermissionExceptionInterceptor : Interceptor
         catch (PermissionDeniedException ex)
         {
             throw new RpcException(new Status(StatusCode.PermissionDenied, ex.Message));
+        }
+        catch (InboxItemStateException ex)
+        {
+            // Someone else holds the item, or it has already been handled.
+            throw new RpcException(new Status(StatusCode.Aborted, ex.Message));
+        }
+        catch (FileUnavailableException ex)
+        {
+            throw new RpcException(new Status(StatusCode.FailedPrecondition, ex.Message));
         }
     }
 }

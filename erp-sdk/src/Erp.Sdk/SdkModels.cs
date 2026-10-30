@@ -303,7 +303,35 @@ public interface IAppWorkflowClient
 public interface IAppDocumentClient
 {
     Task<AppDocumentFile?> GetDocumentAsync(Guid fileId, CancellationToken cancellationToken = default);
+
+    /// <summary>Takes an unclaimed inbox item. Throws an <c>RpcException</c> with <c>Aborted</c> when someone else has it.</summary>
+    Task<AppInboxItem> ClaimInboxItemAsync(Guid itemId, string claimant, CancellationToken cancellationToken = default);
+
+    Task<AppInboxItem> ReleaseInboxItemAsync(Guid itemId, string claimant, CancellationToken cancellationToken = default);
+
+    /// <summary>Marks a claimed item processed and records the object it resulted in.</summary>
+    Task<AppInboxItem> CompleteInboxItemAsync(
+        Guid itemId,
+        string claimant,
+        string? resultObjectId = null,
+        Guid? resultRecordId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<AppInboxItem> RejectInboxItemAsync(Guid itemId, string claimant, string? reason = null, CancellationToken cancellationToken = default);
 }
+
+public sealed record AppInboxItem(
+    Guid Id,
+    Guid InboxId,
+    Guid? CompanyId,
+    string Channel,
+    string Sender,
+    string Subject,
+    string? BodyText,
+    string Status,
+    IReadOnlyList<Guid> FileIds,
+    IReadOnlyList<Guid> DuplicateFileIds,
+    string? ClaimedBy);
 
 public sealed record AppDocumentFile(
     string FileName,

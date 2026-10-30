@@ -9,6 +9,8 @@ using Erp.Core.Api.Middleware;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Apps;
 using Erp.Core.Infrastructure.Attention;
+using Erp.Core.Infrastructure.Documents;
+using Erp.Core.Infrastructure.Storage;
 using Erp.Core.Infrastructure.Events;
 using Erp.Core.Infrastructure.Notifications;
 using Erp.Core.Infrastructure.Security;
@@ -51,6 +53,48 @@ builder.Services.AddSingleton<IEmailSender>(sp =>
 builder.Services.AddSingleton<TaskLinkTokens>();
 builder.Services.AddSingleton<AttentionCache>();
 builder.Services.AddScoped<PermissionService>();
+
+// Documents (ADR-0012): object storage, virus scanning, inbox, inbound e-mail (Brevo) and PDF generation
+builder.Services.Configure<ObjectStorageOptions>(builder.Configuration.GetSection(ObjectStorageOptions.SectionName));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<ObjectStorageOptions>>().Value);
+builder.Services.AddSingleton<IObjectStorage>(sp =>
+    sp.GetRequiredService<ObjectStorageOptions>() is { IsConfigured: true } storage
+        ? new S3ObjectStorage(storage)
+        : new UnconfiguredObjectStorage());
+builder.Services.Configure<DocumentOptions>(builder.Configuration.GetSection(DocumentOptions.SectionName));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<DocumentOptions>>().Value);
+builder.Services.Configure<ClamAvOptions>(builder.Configuration.GetSection(ClamAvOptions.SectionName));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<ClamAvOptions>>().Value);
+builder.Services.AddSingleton<IVirusScanner>(sp =>
+    sp.GetRequiredService<ClamAvOptions>().Host is { Length: > 0 }
+        ? new ClamAvScanner(sp.GetRequiredService<ClamAvOptions>())
+        : new UnavailableVirusScanner());
+builder.Services.Configure<BrevoOptions>(builder.Configuration.GetSection(BrevoOptions.SectionName));
+builder.Services.AddHttpClient<IBrevoAttachmentClient, BrevoAttachmentClient>((sp, client) =>
+{
+    var brevo = sp.GetRequiredService<IOptions<BrevoOptions>>().Value;
+    client.BaseAddress = new Uri(brevo.ApiBaseUrl);
+    if (!string.IsNullOrWhiteSpace(brevo.ApiKey))
+    {
+        client.DefaultRequestHeaders.Add("api-key", brevo.ApiKey);
+    }
+});
+builder.Services.Configure<PdfRendererOptions>(builder.Configuration.GetSection(PdfRendererOptions.SectionName));
+builder.Services.AddHttpClient<HttpPdfRenderer>((sp, client) =>
+{
+    var pdf = sp.GetRequiredService<IOptions<PdfRendererOptions>>().Value;
+    client.BaseAddress = pdf.BaseUrl is { Length: > 0 } url ? new Uri(url.TrimEnd('/') + "/") : null;
+    client.Timeout = pdf.Timeout;
+});
+builder.Services.AddScoped<IPdfRenderer>(sp =>
+    sp.GetRequiredService<IOptions<PdfRendererOptions>>().Value.BaseUrl is { Length: > 0 }
+        ? sp.GetRequiredService<HttpPdfRenderer>()
+        : new UnconfiguredPdfRenderer());
+builder.Services.AddScoped<FileService>();
+builder.Services.AddScoped<InboxService>();
+builder.Services.AddScoped<DocumentGenerator>();
+builder.Services.AddSingleton<InboundEmailService>();
+builder.Services.AddHostedService<FileScanWorker>();
 builder.Services.AddScoped<WorkflowStore>();
 builder.Services.AddScoped<WorkflowNotifier>();
 builder.Services.AddScoped<WorkflowEngine>();
@@ -324,6 +368,8 @@ v1.MapAppManagementEndpoints();
 v1.MapEventEndpoints();
 v1.MapWorkflowEndpoints();
 v1.MapRoleEndpoints();
+v1.MapDocumentEndpoints();
+app.MapGroup("/api/v1").MapInboundEndpoints();
 app.MapGroup("/api/v1").MapTaskResponseEndpoints();
 
 app.MapGrpcService<CoreDataGrpcService>();

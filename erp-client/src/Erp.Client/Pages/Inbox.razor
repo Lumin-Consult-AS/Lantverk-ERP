@@ -1,0 +1,180 @@
+@page "/inbox"
+@inject ErpApiClient Api
+@inject I18nService I18n
+@implements IDisposable
+
+<MudPaper Elevation="2" Class="pa-4">
+    <div class="d-flex flex-wrap align-center gap-2 mb-3">
+        <MudText Typo="Typo.h5">@I18n.T("ui.inbox.title")</MudText>
+        <MudSpacer />
+        <MudSelect T="string" Dense="true" Variant="Variant.Outlined" Style="min-width: 12rem"
+                   Value="_status" ValueChanged="@OnStatusChanged" Label="@I18n.T("ui.inbox.status")">
+            <MudSelectItem T="string" Value="@("new")">@I18n.T("ui.inbox.statusNew")</MudSelectItem>
+            <MudSelectItem T="string" Value="@("claimed")">@I18n.T("ui.inbox.statusClaimed")</MudSelectItem>
+            <MudSelectItem T="string" Value="@("processed")">@I18n.T("ui.inbox.statusProcessed")</MudSelectItem>
+            <MudSelectItem T="string" Value="@("rejected")">@I18n.T("ui.inbox.statusRejected")</MudSelectItem>
+            <MudSelectItem T="string" Value="@("scanning")">@I18n.T("ui.inbox.statusScanning")</MudSelectItem>
+        </MudSelect>
+    </div>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-3">@_error</MudAlert>
+    }
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" />
+    }
+    else if (_items.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info">@I18n.T("ui.inbox.empty")</MudAlert>
+    }
+    else
+    {
+        @foreach (var item in _items)
+        {
+            <MudPaper Outlined="true" Class="pa-3 mb-3" data-item-id="@item.Id">
+                <div class="d-flex flex-wrap align-center gap-2">
+                    <div>
+                        <MudText Typo="Typo.subtitle1"><b>@item.Subject</b></MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @(string.IsNullOrWhiteSpace(item.SenderName) ? item.Sender : $"{item.SenderName} <{item.Sender}>")
+                            · @item.ReceivedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                        </MudText>
+                    </div>
+                    <MudSpacer />
+                    @if (item.DuplicateFileIds.Count > 0)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">@I18n.T("ui.inbox.duplicate")</MudChip>
+                    }
+                    <MudChip T="string" Size="Size.Small">@item.Status</MudChip>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(item.RejectReason))
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@item.RejectReason</MudAlert>
+                }
+
+                @if (item.Status is "new" or "claimed")
+                {
+                    <div class="d-flex flex-wrap align-center gap-2 mt-2">
+                        <MudSelect T="Guid?" Dense="true" Variant="Variant.Outlined" Style="min-width: 16rem"
+                                   Label="@I18n.T("ui.inbox.attachTo")" @bind-Value="_target[item.Id]">
+                            @foreach (var party in _parties)
+                            {
+                                <MudSelectItem T="Guid?" Value="@((Guid?)party.Id)">@PartyLabel(party)</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudSelect T="string" Dense="true" Variant="Variant.Outlined" Style="min-width: 10rem"
+                                   Label="@I18n.T("ui.inbox.category")" @bind-Value="_category[item.Id]">
+                            <MudSelectItem T="string" Value="@("bilag")">bilag</MudSelectItem>
+                            <MudSelectItem T="string" Value="@("avtale")">avtale</MudSelectItem>
+                            <MudSelectItem T="string" Value="@("bilde")">bilde</MudSelectItem>
+                        </MudSelect>
+                        <MudButton Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small"
+                                   Disabled="@(_busy || _target.GetValueOrDefault(item.Id) is null)"
+                                   OnClick="@(() => AttachAsync(item))" data-action="attach">
+                            @I18n.T("ui.inbox.attach")
+                        </MudButton>
+                        <MudButton Color="Color.Error" Variant="Variant.Outlined" Size="Size.Small"
+                                   Disabled="_busy" OnClick="@(() => RejectAsync(item))" data-action="reject">
+                            @I18n.T("ui.inbox.reject")
+                        </MudButton>
+                    </div>
+                }
+            </MudPaper>
+        }
+    }
+</MudPaper>
+
+@code {
+    private IReadOnlyList<ClientInboxItem> _items = [];
+    private IReadOnlyList<ClientRecordData> _parties = [];
+    private readonly Dictionary<Guid, Guid?> _target = new();
+    private readonly Dictionary<Guid, string> _category = new();
+    private string _status = "new";
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        I18n.OnLocaleChanged += StateHasChanged;
+
+        if (Api.CurrentAuth is null)
+        {
+            await Api.DevLoginAsync();
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task OnStatusChanged(string status)
+    {
+        _status = status;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _items = await Api.GetInboxItemsAsync(_status);
+            if (_parties.Count == 0)
+            {
+                // Parties are the first thing a document is attached to; other objects can be added later.
+                _parties = await Api.QueryRecordsAsync("core.party", top: 200);
+            }
+
+            foreach (var item in _items)
+            {
+                _target.TryAdd(item.Id, null);
+                _category.TryAdd(item.Id, "bilag");
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string PartyLabel(ClientRecordData party)
+    {
+        var number = party.Fields.TryGetValue("partyNumber", out var n) ? I18nService.UnwrapDisplayString(n) : string.Empty;
+        var name = party.Fields.TryGetValue("name", out var m) ? I18nService.UnwrapDisplayString(m) : party.Id.ToString("D")[..8];
+        return string.IsNullOrWhiteSpace(number) ? name : $"{number} – {name}";
+    }
+
+    private Task AttachAsync(ClientInboxItem item) =>
+        RunAsync(() => Api.AttachInboxItemAsync(item.Id, "core.party", _target[item.Id]!.Value, _category[item.Id]));
+
+    private Task RejectAsync(ClientInboxItem item) => RunAsync(() => Api.RejectInboxItemAsync(item.Id, null));
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose() => I18n.OnLocaleChanged -= StateHasChanged;
+}

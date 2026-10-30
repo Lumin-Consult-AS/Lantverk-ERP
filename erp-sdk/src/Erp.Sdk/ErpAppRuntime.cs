@@ -268,6 +268,64 @@ internal sealed class GrpcAppDocumentClient(DocumentService.DocumentServiceClien
             res.Content.ToByteArray(),
             res.Sha256);
     }
+
+    public Task<AppInboxItem> ClaimInboxItemAsync(Guid itemId, string claimant, CancellationToken cancellationToken = default) =>
+        InboxActionAsync(client.ClaimInboxItemAsync, itemId, claimant, null, null, null, cancellationToken);
+
+    public Task<AppInboxItem> ReleaseInboxItemAsync(Guid itemId, string claimant, CancellationToken cancellationToken = default) =>
+        InboxActionAsync(client.ReleaseInboxItemAsync, itemId, claimant, null, null, null, cancellationToken);
+
+    public Task<AppInboxItem> CompleteInboxItemAsync(
+        Guid itemId,
+        string claimant,
+        string? resultObjectId = null,
+        Guid? resultRecordId = null,
+        CancellationToken cancellationToken = default) =>
+        InboxActionAsync(client.CompleteInboxItemAsync, itemId, claimant, resultObjectId, resultRecordId, null, cancellationToken);
+
+    public Task<AppInboxItem> RejectInboxItemAsync(
+        Guid itemId,
+        string claimant,
+        string? reason = null,
+        CancellationToken cancellationToken = default) =>
+        InboxActionAsync(client.RejectInboxItemAsync, itemId, claimant, null, null, reason, cancellationToken);
+
+    private async Task<AppInboxItem> InboxActionAsync(
+        Func<InboxItemActionRequest, Grpc.Core.Metadata, DateTime?, CancellationToken, Grpc.Core.AsyncUnaryCall<InboxItemProto>> call,
+        Guid itemId,
+        string claimant,
+        string? resultObjectId,
+        Guid? resultRecordId,
+        string? reason,
+        CancellationToken cancellationToken)
+    {
+        var res = await call(
+            new InboxItemActionRequest
+            {
+                Context = context,
+                ItemId = itemId.ToString("D"),
+                Claimant = claimant,
+                ResultObjectId = resultObjectId ?? string.Empty,
+                ResultRecordId = resultRecordId?.ToString("D") ?? string.Empty,
+                Reason = reason ?? string.Empty
+            },
+            GrpcAppDataClient.CreateAuthHeaders(context),
+            null,
+            cancellationToken);
+
+        return new AppInboxItem(
+            Guid.Parse(res.Id),
+            Guid.Parse(res.InboxId),
+            Guid.TryParse(res.CompanyId, out var companyId) ? companyId : null,
+            res.Channel,
+            res.Sender,
+            res.Subject,
+            string.IsNullOrEmpty(res.BodyText) ? null : res.BodyText,
+            res.Status,
+            res.FileIds.Select(Guid.Parse).ToList(),
+            res.DuplicateFileIds.Select(Guid.Parse).ToList(),
+            string.IsNullOrEmpty(res.ClaimedBy) ? null : res.ClaimedBy);
+    }
 }
 
 /// <summary>

@@ -1,0 +1,9 @@
+{
+  "name": "erp-pdf-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Renders HTML to PDF with headless Chromium for the ERP document service.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "playwright": "1.49.1" }
+}

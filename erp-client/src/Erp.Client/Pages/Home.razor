@@ -8,6 +8,11 @@
     <MudItem xs="12" md="7">
         <MudPaper Elevation="2" Class="pa-4 mb-4">
             <MudText Typo="Typo.h5" Class="mb-3">@I18n.T("ui.nav.home")</MudText>
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3" data-error="true">@_error</MudAlert>
+            }
             @if (_attention.Count(i => !i.Hidden) == 0)
             {
                 <MudAlert Severity="Severity.Info">@I18n.T("ui.status.worklistEmpty")</MudAlert>
@@ -138,19 +143,32 @@
 
     private IReadOnlyList<ClientAttentionItem> _attention = [];
     private bool _showHidden;
+    private string? _error;
 
     protected override async Task OnInitializedAsync()
     {
         Api.OnStateChanged += OnApiStateChanged;
         I18n.OnLocaleChanged += StateHasChanged;
 
-        if (Api.CurrentAuth is null)
+        try
         {
-            await Api.DevLoginAsync();
+            if (Api.CurrentAuth is null)
+            {
+                if (await Api.DevLoginAsync() is null)
+                {
+                    _error = string.Format(I18n.T("ui.error.login"), Api.ApiAddress);
+                    return;
+                }
+            }
+            else if (Api.CurrentSession is null)
+            {
+                await Api.RefreshSessionAndMetadataAsync();
+            }
         }
-        else if (Api.CurrentSession is null)
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or NotSupportedException)
         {
-            await Api.RefreshSessionAndMetadataAsync();
+            _error = string.Format(I18n.T("ui.error.login"), Api.ApiAddress);
+            return;
         }
 
         await LoadAttentionAsync();
@@ -187,6 +205,10 @@
         {
             Nav.NavigateTo("/tasks");
         }
+        else if (item.Page is "core.inbox")
+        {
+            Nav.NavigateTo("/inbox");
+        }
         else if (!string.IsNullOrWhiteSpace(item.Page))
         {
             Nav.NavigateTo($"/page/{item.Page}");
@@ -211,19 +233,27 @@
         await LoadAttentionAsync();
     }
 
-    private async Task InstallCorePartiesAsync()
-    {
-        await Api.InstallBuiltInAppAsync("core.parties");
-    }
+    private Task InstallCorePartiesAsync() => RunAppActionAsync(() => Api.InstallBuiltInAppAsync("core.parties"), "ui.error.install");
 
-    private async Task InstallDemoContactsAsync()
-    {
-        await Api.InstallBuiltInAppAsync("demo.contacts");
-    }
+    private Task InstallDemoContactsAsync() => RunAppActionAsync(() => Api.InstallBuiltInAppAsync("demo.contacts"), "ui.error.install");
 
-    private async Task UninstallAppAsync(string appId)
+    private Task UninstallAppAsync(string appId) => RunAppActionAsync(() => Api.UninstallAppAsync(appId), "ui.error.uninstall");
+
+    /// <summary>Runs an install/uninstall and tells the user when it did not work, instead of failing silently.</summary>
+    private async Task RunAppActionAsync(Func<Task<bool>> action, string errorKey)
     {
-        await Api.UninstallAppAsync(appId);
+        _error = null;
+        try
+        {
+            if (!await action())
+            {
+                _error = string.Format(I18n.T(errorKey), Api.ApiAddress);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or NotSupportedException)
+        {
+            _error = $"{string.Format(I18n.T(errorKey), Api.ApiAddress)} ({ex.Message})";
+        }
     }
 
     public void Dispose()

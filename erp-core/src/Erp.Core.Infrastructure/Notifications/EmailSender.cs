@@ -22,7 +22,13 @@ public sealed class EmailOptions
     public TimeSpan LinkLifetime { get; set; } = TimeSpan.FromDays(7);
 }
 
-public sealed record EmailMessage(string To, string Subject, string TextBody);
+public sealed record EmailAttachment(string FileName, string ContentType, byte[] Content);
+
+public sealed record EmailMessage(
+    string To,
+    string Subject,
+    string TextBody,
+    IReadOnlyList<EmailAttachment>? Attachments = null);
 
 public interface IEmailSender
 {
@@ -45,6 +51,21 @@ public sealed class SmtpEmailSender(EmailOptions options) : IEmailSender
     {
         using var client = new SmtpClient(options.SmtpHost, options.SmtpPort);
         using var mail = new MailMessage(options.From, message.To, message.Subject, message.TextBody);
-        await client.SendMailAsync(mail, cancellationToken);
+        var streams = new List<MemoryStream>();
+        try
+        {
+            foreach (var attachment in message.Attachments ?? [])
+            {
+                var stream = new MemoryStream(attachment.Content, writable: false);
+                streams.Add(stream);
+                mail.Attachments.Add(new Attachment(stream, attachment.FileName, attachment.ContentType));
+            }
+
+            await client.SendMailAsync(mail, cancellationToken);
+        }
+        finally
+        {
+            streams.ForEach(s => s.Dispose());
+        }
     }
 }
