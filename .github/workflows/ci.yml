@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, "LUM-**" ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore dependencies
+        run: dotnet restore erp-core/Erp.Core.sln
+
+      - name: Build solution
+        run: dotnet build erp-core/Erp.Core.sln --configuration Release --no-restore
+
+      - name: Run xUnit tests (including Testcontainers PostgreSQL RLS tests)
+        run: dotnet test erp-core/Erp.Core.sln --configuration Release --no-build --verbosity normal
+
+      - name: Build erp-core container image
+        run: docker build -t erp-core:ci ./erp-core
+
