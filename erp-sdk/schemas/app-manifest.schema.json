@@ -162,6 +162,49 @@
         }
       }
     },
+    "syncSets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "objects"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "objects": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "required": ["object"],
+                  "properties": {
+                    "object": { "type": "string" },
+                    "filter": { "type": "string" }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "handler"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "handler": { "type": "string" },
+          "onConflict": {
+            "type": "string",
+            "enum": ["reject", "adjust", "manual"]
+          }
+        }
+      }
+    },
     "attention": {
       "type": "array",
       "items": {

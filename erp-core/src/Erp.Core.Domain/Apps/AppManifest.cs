@@ -32,6 +32,12 @@ public sealed class AppManifest
     /// <summary>Default approval flows shipped by the app; copied into the tenant's workflow definitions on install.</summary>
     public List<WorkflowDefinition> Workflows { get; set; } = [];
 
+    /// <summary>Record sets an offline client can download (delta sync).</summary>
+    public List<SyncSetDefinition> SyncSets { get; set; } = [];
+
+    /// <summary>Business actions an offline client can queue; carried out by the app when the client reconnects.</summary>
+    public List<CommandDefinition> Commands { get; set; } = [];
+
     /// <summary>
     /// Localization dictionaries keyed by locale code (e.g. <c>nb</c>, <c>en</c>).
     /// </summary>

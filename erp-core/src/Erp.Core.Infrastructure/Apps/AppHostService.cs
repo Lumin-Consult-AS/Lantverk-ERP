@@ -22,6 +22,9 @@ public sealed class AppHostOptions
     /// <summary>Deadline for one step (batch) of a data migration; much longer than a synchronous hook.</summary>
     public TimeSpan MigrationStepTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
+    /// <summary>Deadline for an app to carry out one command queued by an offline client.</summary>
+    public TimeSpan CommandTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
     /// <summary>
     /// Optional Core callback endpoint URL sent via <c>x-erp-core-endpoint</c> header.
     /// </summary>
@@ -244,6 +247,60 @@ public sealed class AppHostService(
             },
             headers: headers,
             deadline: DateTime.UtcNow.Add(_options.MigrationStepTimeout),
+            cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Asks an app to carry out a command a client queued while offline (ADR-0014). The handler works through the data
+    /// API as the current user, so validation hooks and permissions apply as they would online.
+    /// </summary>
+    public async Task<CommandResponse> RunCommandAsync(
+        string appId,
+        string commandId,
+        Guid runId,
+        Guid deviceId,
+        string argsJson,
+        IEnumerable<CommandTargetProto> targets,
+        bool conflict,
+        bool forced,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = tenantContext.TenantId
+            ?? throw new InvalidOperationException("Cannot run a command without an active tenant context.");
+
+        var installedApp = await dbContext.InstalledApps
+            .AsNoTracking()
+            .FirstOrDefaultAsync(a => a.AppId == appId, cancellationToken)
+            ?? throw new KeyNotFoundException($"App '{appId}' is not installed in this tenant.");
+
+        var endpoint = orchestrator.ResolveEndpoint(installedApp.AppId, installedApp.Version)
+            ?? throw new InvalidOperationException($"No running container endpoint registered for app '{appId}@{installedApp.Version}'.");
+
+        using var channel = CreateChannel(endpoint);
+        var client = new AppService.AppServiceClient(channel);
+
+        var headers = new Grpc.Core.Metadata();
+        if (!string.IsNullOrWhiteSpace(_options.CoreCallbackEndpoint))
+        {
+            headers.Add("x-erp-core-endpoint", _options.CoreCallbackEndpoint);
+        }
+
+        var request = new CommandRequest
+        {
+            Context = CreateCallContextProto(tenantId, tenantContext.CompanyId, runId.ToString("D")),
+            CommandId = commandId,
+            RunId = runId.ToString("D"),
+            DeviceId = deviceId.ToString("D"),
+            ArgsJson = argsJson,
+            Conflict = conflict,
+            Forced = forced
+        };
+        request.Targets.AddRange(targets);
+
+        return await client.RunCommandAsync(
+            request,
+            headers: headers,
+            deadline: DateTime.UtcNow.Add(_options.CommandTimeout),
             cancellationToken: cancellationToken);
     }
 

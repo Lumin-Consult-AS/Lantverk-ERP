@@ -32,7 +32,9 @@ public static class AppManifestParser
         "permissionSets",
         "migrations",
         "attention",
-        "workflows"
+        "workflows",
+        "syncSets",
+        "commands"
     };
 
     private static readonly HashSet<string> AllowedPermissions = new(StringComparer.OrdinalIgnoreCase)
@@ -287,6 +289,56 @@ public static class AppManifestParser
                 {
                     manifest.Workflows.Add(Erp.Core.Infrastructure.Workflow.WorkflowYamlParser.Parse(wfMap));
                 }
+            }
+        }
+
+        // Parse offline sync sets and commands
+        if (root.TryGetValue("syncSets", out var syncObj) && syncObj is IEnumerable<object> syncList)
+        {
+            foreach (var item in syncList.OfType<IDictionary<object, object>>())
+            {
+                var set = new SyncSetDefinition
+                {
+                    Id = GetString(item, "id") ?? string.Empty,
+                    OwnerApp = manifest.Id,
+                    Label = GetString(item, "label") ?? string.Empty
+                };
+
+                if (item.TryGetValue("objects", out var objectsObj) && objectsObj is IEnumerable<object> objects)
+                {
+                    foreach (var entry in objects)
+                    {
+                        if (entry is string objectId)
+                        {
+                            set.Objects.Add(new SyncSetObjectDefinition { Object = objectId });
+                        }
+                        else if (entry is IDictionary<object, object> objectMap)
+                        {
+                            set.Objects.Add(new SyncSetObjectDefinition
+                            {
+                                Object = GetString(objectMap, "object") ?? string.Empty,
+                                Filter = GetString(objectMap, "filter")
+                            });
+                        }
+                    }
+                }
+
+                manifest.SyncSets.Add(set);
+            }
+        }
+
+        if (root.TryGetValue("commands", out var cmdObj) && cmdObj is IEnumerable<object> cmdList)
+        {
+            foreach (var item in cmdList.OfType<IDictionary<object, object>>())
+            {
+                manifest.Commands.Add(new CommandDefinition
+                {
+                    Id = GetString(item, "id") ?? string.Empty,
+                    OwnerApp = manifest.Id,
+                    Label = GetString(item, "label") ?? string.Empty,
+                    Handler = GetString(item, "handler") ?? string.Empty,
+                    OnConflict = GetString(item, "onConflict") ?? CommandConflictRules.Reject
+                });
             }
         }
 
