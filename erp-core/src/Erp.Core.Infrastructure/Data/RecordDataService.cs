@@ -1,0 +1,1082 @@
+using System.Data;
+using System.Data.Common;
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using Erp.Core.Domain.Data;
+using Erp.Core.Domain.Metadata;
+using Erp.Core.Domain.Tenancy;
+using Erp.Core.Infrastructure.Metadata;
+using Erp.Core.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Npgsql;
+using NpgsqlTypes;
+
+namespace Erp.Core.Infrastructure.Data;
+
+/// <summary>
+/// Generic metadata-driven Data API service supporting Get, Query (with filter tree),
+/// Create, Update (with optimistic concurrency via <c>row_version</c>), Delete, Batch,
+/// and Audit Trail inspection.
+/// </summary>
+public sealed class RecordDataService(
+    CoreDbContext dbContext,
+    MetadataRegistryService metadataRegistry,
+    ITenantContext tenantContext)
+{
+    public async Task<RecordData?> GetAsync(
+        string objectId,
+        Guid id,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var objectDef = await RequireObjectAsync(objectId, cancellationToken);
+        var (schema, table) = objectDef.GetSchemaAndTable();
+
+        var sql = new StringBuilder($"""SELECT * FROM "{schema}"."{table}" WHERE id = @id""");
+        if (companyId.HasValue && objectDef.IsCompanyScoped)
+        {
+            sql.Append(" AND (company_id = @companyId OR company_id IS NULL)");
+        }
+
+        return await ExecuteWithConnectionAsync(async (conn, tx) =>
+        {
+            await using var cmd = CreateCommand(conn, tx, sql.ToString());
+            AddParameter(cmd, "id", id);
+            if (companyId.HasValue && objectDef.IsCompanyScoped)
+            {
+                AddParameter(cmd, "companyId", companyId.Value);
+            }
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return ReadRecord(reader, objectDef);
+        }, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<RecordData>> QueryAsync(
+        string objectId,
+        DataQuery query,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var objectDef = await RequireObjectAsync(objectId, cancellationToken);
+        var (schema, table) = objectDef.GetSchemaAndTable();
+
+        return await ExecuteWithConnectionAsync(async (conn, tx) =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+
+            var whereClauses = new List<string>();
+            if (companyId.HasValue && objectDef.IsCompanyScoped)
+            {
+                whereClauses.Add("(company_id = @companyId OR company_id IS NULL)");
+                AddParameter(cmd, "companyId", companyId.Value);
+            }
+
+            if (query.Filter is not null)
+            {
+                var paramIndex = 0;
+                var filterSql = CompileFilterNode(query.Filter, objectDef, cmd, ref paramIndex);
+                whereClauses.Add(filterSql);
+            }
+
+            var sql = new StringBuilder($"""SELECT * FROM "{schema}"."{table}" """);
+            if (whereClauses.Count > 0)
+            {
+                sql.Append("WHERE ").Append(string.Join(" AND ", whereClauses)).Append(' ');
+            }
+
+            if (query.OrderBy is { Count: > 0 })
+            {
+                var orderParts = new List<string>();
+                foreach (var sort in query.OrderBy)
+                {
+                    var (col, _) = ResolveFilterTargetColumn(sort.Field, objectDef);
+                    orderParts.Add($"\"{col}\" {(sort.Descending ? "DESC" : "ASC")}");
+                }
+                sql.Append("ORDER BY ").Append(string.Join(", ", orderParts)).Append(' ');
+            }
+            else
+            {
+                sql.Append("ORDER BY created_at DESC, id ASC ");
+            }
+
+            var top = Math.Clamp(query.Top <= 0 ? 50 : query.Top, 1, 1000);
+            var skip = Math.Max(0, query.Skip);
+            sql.Append($"LIMIT {top} OFFSET {skip};");
+
+            cmd.CommandText = sql.ToString();
+
+            var results = new List<RecordData>();
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var record = ReadRecord(reader, objectDef, query.Select);
+                results.Add(record);
+            }
+
+            return (IReadOnlyList<RecordData>)results;
+        }, cancellationToken);
+    }
+
+    public async Task<RecordData> CreateAsync(
+        string objectId,
+        IDictionary<string, object?> fields,
+        Guid? companyId = null,
+        Guid? explicitId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var objectDef = await RequireObjectAsync(objectId, cancellationToken);
+        var (schema, table) = objectDef.GetSchemaAndTable();
+
+        var tenantId = tenantContext.TenantId
+            ?? throw new InvalidOperationException("Cannot create a record without an active TenantId in ITenantContext.");
+        var userId = tenantContext.UserId ?? tenantId;
+        var effectiveCompanyId = objectDef.IsCompanyScoped ? (companyId ?? tenantContext.CompanyId) : null;
+        var recordId = explicitId is { } eid && eid != Guid.Empty ? eid : Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        ValidateUnknownFields(fields, objectDef);
+
+        return await ExecuteWithConnectionAsync(async (conn, tx) =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+
+            var columnNames = new List<string>
+            {
+                "\"id\"",
+                "\"tenant_id\"",
+                "\"company_id\"",
+                "\"created_at\"",
+                "\"created_by\"",
+                "\"updated_at\"",
+                "\"updated_by\"",
+                "\"row_version\""
+            };
+
+            var paramNames = new List<string>
+            {
+                "@id",
+                "@tenant_id",
+                "@company_id",
+                "@created_at",
+                "@created_by",
+                "@updated_at",
+                "@updated_by",
+                "@row_version"
+            };
+
+            AddParameter(cmd, "id", recordId);
+            AddParameter(cmd, "tenant_id", tenantId);
+            AddParameter(cmd, "company_id", (object?)effectiveCompanyId ?? DBNull.Value);
+            AddParameter(cmd, "created_at", now);
+            AddParameter(cmd, "created_by", userId);
+            AddParameter(cmd, "updated_at", now);
+            AddParameter(cmd, "updated_by", userId);
+            AddParameter(cmd, "row_version", 1L);
+
+            var pIdx = 0;
+            foreach (var field in objectDef.Fields)
+            {
+                var hasValue = TryGetFieldInput(fields, field, objectDef.OwnerApp, out var rawValue);
+                if (!hasValue || rawValue is null)
+                {
+                    if (field.DefaultValue is not null)
+                    {
+                        rawValue = field.DefaultValue;
+                        hasValue = true;
+                    }
+                    else if (field.Required)
+                    {
+                        throw new RecordValidationException(
+                            $"Field '{field.Name}' on '{objectDef.Id}' is required.",
+                            field.Name);
+                    }
+                }
+
+                if (!hasValue)
+                {
+                    continue;
+                }
+
+                pIdx = await BindFieldParametersAsync(
+                    cmd,
+                    field,
+                    objectDef.OwnerApp,
+                    rawValue,
+                    pIdx,
+                    (col, pName) =>
+                    {
+                        columnNames.Add($"\"{col}\"");
+                        paramNames.Add(pName);
+                    },
+                    cancellationToken);
+            }
+
+            cmd.CommandText =
+                $"""
+                INSERT INTO "{schema}"."{table}" ({string.Join(", ", columnNames)})
+                VALUES ({string.Join(", ", paramNames)})
+                RETURNING *;
+                """;
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            return ReadRecord(reader, objectDef);
+        }, cancellationToken);
+    }
+
+    public async Task<RecordData> UpdateAsync(
+        string objectId,
+        Guid id,
+        long expectedRowVersion,
+        IDictionary<string, object?> fields,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var objectDef = await RequireObjectAsync(objectId, cancellationToken);
+        var (schema, table) = objectDef.GetSchemaAndTable();
+        var userId = tenantContext.UserId ?? tenantContext.TenantId ?? Guid.Empty;
+        var now = DateTimeOffset.UtcNow;
+
+        ValidateUnknownFields(fields, objectDef);
+
+        return await ExecuteWithConnectionAsync(async (conn, tx) =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+
+            var assignments = new List<string>
+            {
+                "\"updated_at\" = @updated_at",
+                "\"updated_by\" = @updated_by",
+                "\"row_version\" = \"row_version\" + 1"
+            };
+
+            AddParameter(cmd, "id", id);
+            AddParameter(cmd, "expected_row_version", expectedRowVersion);
+            AddParameter(cmd, "updated_at", now);
+            AddParameter(cmd, "updated_by", userId);
+
+            var pIdx = 0;
+            foreach (var field in objectDef.Fields)
+            {
+                if (!TryGetFieldInput(fields, field, objectDef.OwnerApp, out var rawValue))
+                {
+                    continue;
+                }
+
+                if (rawValue is null && field.Required)
+                {
+                    throw new RecordValidationException(
+                        $"Required field '{field.Name}' on '{objectDef.Id}' cannot be set to null.",
+                        field.Name);
+                }
+
+                pIdx = await BindFieldParametersAsync(
+                    cmd,
+                    field,
+                    objectDef.OwnerApp,
+                    rawValue,
+                    pIdx,
+                    (col, pName) => assignments.Add($"\"{col}\" = {pName}"),
+                    cancellationToken);
+            }
+
+            var companyClause = companyId.HasValue && objectDef.IsCompanyScoped
+                ? " AND (company_id = @companyId OR company_id IS NULL)"
+                : string.Empty;
+
+            if (companyId.HasValue && objectDef.IsCompanyScoped)
+            {
+                AddParameter(cmd, "companyId", companyId.Value);
+            }
+
+            cmd.CommandText =
+                $"""
+                UPDATE "{schema}"."{table}"
+                   SET {string.Join(", ", assignments)}
+                 WHERE id = @id
+                   AND row_version = @expected_row_version{companyClause}
+                RETURNING *;
+                """;
+
+            await using (var reader = await cmd.ExecuteReaderAsync(cancellationToken))
+            {
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    return ReadRecord(reader, objectDef);
+                }
+            }
+
+            // Distinguish between 404 Not Found and 412 Concurrency Conflict
+            await ThrowNotFoundOrConcurrencyConflictAsync(conn, tx, schema, table, objectDef.Id, id, expectedRowVersion, cancellationToken);
+            throw new RecordNotFoundException(objectDef.Id, id);
+        }, cancellationToken);
+    }
+
+    public async Task DeleteAsync(
+        string objectId,
+        Guid id,
+        long expectedRowVersion,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var objectDef = await RequireObjectAsync(objectId, cancellationToken);
+        var (schema, table) = objectDef.GetSchemaAndTable();
+
+        await ExecuteWithConnectionAsync<object?>(async (conn, tx) =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+
+            AddParameter(cmd, "id", id);
+            AddParameter(cmd, "expected_row_version", expectedRowVersion);
+
+            var companyClause = companyId.HasValue && objectDef.IsCompanyScoped
+                ? " AND (company_id = @companyId OR company_id IS NULL)"
+                : string.Empty;
+
+            if (companyId.HasValue && objectDef.IsCompanyScoped)
+            {
+                AddParameter(cmd, "companyId", companyId.Value);
+            }
+
+            cmd.CommandText =
+                $"""
+                DELETE FROM "{schema}"."{table}"
+                 WHERE id = @id
+                   AND row_version = @expected_row_version{companyClause};
+                """;
+
+            var affected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            if (affected == 0)
+            {
+                await ThrowNotFoundOrConcurrencyConflictAsync(conn, tx, schema, table, objectDef.Id, id, expectedRowVersion, cancellationToken);
+            }
+
+            return null;
+        }, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<BatchResultItem>> BatchAsync(
+        IReadOnlyList<BatchOperation> operations,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var results = new List<BatchResultItem>(operations.Count);
+
+        await using var tx = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            for (var i = 0; i < operations.Count; i++)
+            {
+                var op = operations[i];
+                switch (op.Method)
+                {
+                    case BatchMethod.Create:
+                    {
+                        var created = await CreateAsync(
+                            op.ObjectId,
+                            op.Fields ?? new Dictionary<string, object?>(),
+                            companyId,
+                            op.Id,
+                            cancellationToken);
+                        results.Add(new BatchResultItem(i, BatchMethod.Create, op.ObjectId, created.Id, created));
+                        break;
+                    }
+                    case BatchMethod.Update:
+                    {
+                        if (!op.Id.HasValue)
+                        {
+                            throw new RecordValidationException($"Batch Update at index {i} requires 'id'.");
+                        }
+                        if (!op.RowVersion.HasValue)
+                        {
+                            throw new RecordValidationException($"Batch Update at index {i} requires 'rowVersion'.");
+                        }
+
+                        var updated = await UpdateAsync(
+                            op.ObjectId,
+                            op.Id.Value,
+                            op.RowVersion.Value,
+                            op.Fields ?? new Dictionary<string, object?>(),
+                            companyId,
+                            cancellationToken);
+                        results.Add(new BatchResultItem(i, BatchMethod.Update, op.ObjectId, updated.Id, updated));
+                        break;
+                    }
+                    case BatchMethod.Delete:
+                    {
+                        if (!op.Id.HasValue)
+                        {
+                            throw new RecordValidationException($"Batch Delete at index {i} requires 'id'.");
+                        }
+                        if (!op.RowVersion.HasValue)
+                        {
+                            throw new RecordValidationException($"Batch Delete at index {i} requires 'rowVersion'.");
+                        }
+
+                        await DeleteAsync(op.ObjectId, op.Id.Value, op.RowVersion.Value, companyId, cancellationToken);
+                        results.Add(new BatchResultItem(i, BatchMethod.Delete, op.ObjectId, op.Id.Value));
+                        break;
+                    }
+                    default:
+                        throw new RecordValidationException($"Unsupported batch method '{op.Method}'.");
+                }
+            }
+
+            await tx.CommitAsync(cancellationToken);
+            return results;
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task<IReadOnlyList<AuditEntry>> GetAuditTrailAsync(
+        string objectId,
+        Guid recordId,
+        CancellationToken cancellationToken = default)
+    {
+        var objectDef = await RequireObjectAsync(objectId, cancellationToken);
+        var (schema, _) = objectDef.GetSchemaAndTable();
+        var auditTable = objectDef.GetAuditTableName();
+
+        return await ExecuteWithConnectionAsync(async (conn, tx) =>
+        {
+            await using var cmd = CreateCommand(
+                conn,
+                tx,
+                $"""
+                SELECT audit_id, record_id, tenant_id, operation, old_data, new_data, changed_by, changed_at, reason
+                  FROM "{schema}"."{auditTable}"
+                 WHERE record_id = @recordId
+                 ORDER BY audit_id ASC;
+                """);
+            AddParameter(cmd, "recordId", recordId);
+
+            var entries = new List<AuditEntry>();
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var oldJson = reader.IsDBNull(4) ? null : reader.GetString(4);
+                var newJson = reader.IsDBNull(5) ? null : reader.GetString(5);
+
+                entries.Add(new AuditEntry(
+                    AuditId: reader.GetInt64(0),
+                    RecordId: reader.GetGuid(1),
+                    TenantId: reader.GetGuid(2),
+                    Operation: reader.GetString(3),
+                    OldData: oldJson is null ? null : JsonSerializer.Deserialize<Dictionary<string, object?>>(oldJson),
+                    NewData: newJson is null ? null : JsonSerializer.Deserialize<Dictionary<string, object?>>(newJson),
+                    ChangedBy: reader.GetGuid(6),
+                    ChangedAt: reader.GetFieldValue<DateTimeOffset>(7),
+                    Reason: reader.IsDBNull(8) ? null : reader.GetString(8)));
+            }
+
+            return (IReadOnlyList<AuditEntry>)entries;
+        }, cancellationToken);
+    }
+
+    private async Task<ObjectDefinition> RequireObjectAsync(string objectId, CancellationToken cancellationToken)
+        => await metadataRegistry.GetObjectAsync(objectId, cancellationToken)
+           ?? throw new ObjectNotFoundException(objectId);
+
+    private static async Task ThrowNotFoundOrConcurrencyConflictAsync(
+        DbConnection conn,
+        DbTransaction? tx,
+        string schema,
+        string table,
+        string objectId,
+        Guid id,
+        long expectedRowVersion,
+        CancellationToken cancellationToken)
+    {
+        await using var checkCmd = CreateCommand(
+            conn,
+            tx,
+            $"""SELECT row_version FROM "{schema}"."{table}" WHERE id = @id;""");
+        AddParameter(checkCmd, "id", id);
+
+        var currentVersionObj = await checkCmd.ExecuteScalarAsync(cancellationToken);
+        if (currentVersionObj is not null and not DBNull)
+        {
+            throw new ConcurrencyConflictException(objectId, id, expectedRowVersion);
+        }
+
+        throw new RecordNotFoundException(objectId, id);
+    }
+
+    private async Task<int> BindFieldParametersAsync(
+        DbCommand cmd,
+        FieldDefinition field,
+        string objectOwnerApp,
+        object? rawValue,
+        int pIdx,
+        Action<string, string> onColumnBound,
+        CancellationToken cancellationToken)
+    {
+        var colName = field.GetColumnName(objectOwnerApp);
+
+        if (field.Type == FieldType.Money)
+        {
+            var amountCol = $"{colName}_amount";
+            var currencyCol = $"{colName}_currency";
+            var amountParam = $"@p{pIdx++}";
+            var currencyParam = $"@p{pIdx++}";
+
+            if (rawValue is null)
+            {
+                AddParameter(cmd, amountParam, DBNull.Value);
+                AddParameter(cmd, currencyParam, DBNull.Value);
+            }
+            else
+            {
+                var money = CoerceToMoney(rawValue, field.Name);
+                AddParameter(cmd, amountParam, money.Amount);
+                AddParameter(cmd, currencyParam, money.Currency);
+            }
+
+            onColumnBound(amountCol, amountParam);
+            onColumnBound(currencyCol, currencyParam);
+            return pIdx;
+        }
+
+        var paramName = $"@p{pIdx++}";
+        if (rawValue is null)
+        {
+            AddParameter(cmd, paramName, DBNull.Value);
+            onColumnBound(colName, paramName);
+            return pIdx;
+        }
+
+        var typedValue = await CoerceAndValidateScalarAsync(field, rawValue, cancellationToken);
+        if (field.Type == FieldType.Json && cmd is NpgsqlCommand npgsqlCmd)
+        {
+            npgsqlCmd.Parameters.Add(new NpgsqlParameter(paramName, NpgsqlDbType.Jsonb)
+            {
+                Value = typedValue
+            });
+        }
+        else
+        {
+            AddParameter(cmd, paramName, typedValue);
+        }
+
+        onColumnBound(colName, paramName);
+        return pIdx;
+    }
+
+    private async Task<object> CoerceAndValidateScalarAsync(
+        FieldDefinition field,
+        object rawValue,
+        CancellationToken cancellationToken)
+    {
+        var unwrapped = UnwrapJsonElement(rawValue);
+        if (unwrapped is null)
+        {
+            return DBNull.Value;
+        }
+
+        switch (field.Type)
+        {
+            case FieldType.String:
+            {
+                var str = Convert.ToString(unwrapped, CultureInfo.InvariantCulture) ?? string.Empty;
+                var maxLen = field.MaxLength ?? 255;
+                if (str.Length > maxLen)
+                {
+                    throw new RecordValidationException(
+                        $"Field '{field.Name}' exceeds maximum length of {maxLen}.",
+                        field.Name);
+                }
+                return str;
+            }
+            case FieldType.Text:
+                return Convert.ToString(unwrapped, CultureInfo.InvariantCulture) ?? string.Empty;
+
+            case FieldType.Integer:
+                if (unwrapped is long l) return l;
+                if (unwrapped is int i) return (long)i;
+                if (long.TryParse(Convert.ToString(unwrapped, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedLong))
+                {
+                    return parsedLong;
+                }
+                throw new RecordValidationException($"Field '{field.Name}' must be an integer.", field.Name);
+
+            case FieldType.Decimal:
+            {
+                decimal dec;
+                if (unwrapped is decimal d) dec = d;
+                else if (unwrapped is double dbl) dec = (decimal)dbl;
+                else if (unwrapped is long dl) dec = dl;
+                else if (unwrapped is int di) dec = di;
+                else if (!decimal.TryParse(Convert.ToString(unwrapped, CultureInfo.InvariantCulture), NumberStyles.Number, CultureInfo.InvariantCulture, out dec))
+                {
+                    throw new RecordValidationException($"Field '{field.Name}' must be a decimal number.", field.Name);
+                }
+
+                var scale = Math.Clamp(field.Scale ?? 2, 0, 10);
+                return Math.Round(dec, scale, MidpointRounding.AwayFromZero);
+            }
+
+            case FieldType.Boolean:
+                if (unwrapped is bool b) return b;
+                if (bool.TryParse(Convert.ToString(unwrapped, CultureInfo.InvariantCulture), out var parsedBool))
+                {
+                    return parsedBool;
+                }
+                throw new RecordValidationException($"Field '{field.Name}' must be a boolean.", field.Name);
+
+            case FieldType.Date:
+                if (unwrapped is DateOnly dateOnly) return dateOnly;
+                if (unwrapped is DateTime dt) return DateOnly.FromDateTime(dt);
+                if (DateOnly.TryParse(Convert.ToString(unwrapped, CultureInfo.InvariantCulture), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
+                {
+                    return parsedDate;
+                }
+                throw new RecordValidationException($"Field '{field.Name}' must be a valid ISO date (YYYY-MM-DD).", field.Name);
+
+            case FieldType.DateTime:
+                if (unwrapped is DateTimeOffset dto) return dto.ToUniversalTime();
+                if (unwrapped is DateTime dtVal) return new DateTimeOffset(DateTime.SpecifyKind(dtVal, DateTimeKind.Utc));
+                if (DateTimeOffset.TryParse(Convert.ToString(unwrapped, CultureInfo.InvariantCulture), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedDto))
+                {
+                    return parsedDto.ToUniversalTime();
+                }
+                throw new RecordValidationException($"Field '{field.Name}' must be a valid ISO datetime.", field.Name);
+
+            case FieldType.Uuid:
+            case FieldType.Reference:
+            case FieldType.Blob:
+                if (unwrapped is Guid g) return g;
+                if (Guid.TryParse(Convert.ToString(unwrapped, CultureInfo.InvariantCulture), out var parsedGuid))
+                {
+                    return parsedGuid;
+                }
+                throw new RecordValidationException($"Field '{field.Name}' must be a valid UUID.", field.Name);
+
+            case FieldType.Enum:
+            {
+                var valStr = Convert.ToString(unwrapped, CultureInfo.InvariantCulture) ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(field.EnumType))
+                {
+                    var enumDef = await metadataRegistry.GetEnumAsync(field.EnumType, cancellationToken);
+                    if (enumDef is not null && !enumDef.Values.Contains(valStr, StringComparer.Ordinal))
+                    {
+                        throw new RecordValidationException(
+                            $"Invalid value '{valStr}' for enum field '{field.Name}' (allowed: {string.Join(", ", enumDef.Values)}).",
+                            field.Name);
+                    }
+                }
+                return valStr;
+            }
+
+            case FieldType.Json:
+                return rawValue is JsonElement je
+                    ? je.GetRawText()
+                    : rawValue is string s
+                        ? s
+                        : JsonSerializer.Serialize(rawValue);
+
+            default:
+                throw new RecordValidationException($"Unsupported field type '{field.Type}' on '{field.Name}'.", field.Name);
+        }
+    }
+
+    private static MoneyValue CoerceToMoney(object rawValue, string fieldName)
+    {
+        if (rawValue is MoneyValue mv)
+        {
+            return mv;
+        }
+
+        if (rawValue is JsonElement je && je.ValueKind == JsonValueKind.Object)
+        {
+            var amountProp = je.TryGetProperty("amount", out var a) ? a : je.GetProperty("Amount");
+            var currProp = je.TryGetProperty("currency", out var c) ? c : je.GetProperty("Currency");
+            var amount = amountProp.GetDecimal();
+            var currency = currProp.GetString() ?? string.Empty;
+            if (currency.Length != 3)
+            {
+                throw new RecordValidationException($"Money field '{fieldName}' requires a 3-letter currency code.", fieldName);
+            }
+            return new MoneyValue(amount, currency.ToUpperInvariant());
+        }
+
+        if (rawValue is IDictionary<string, object?> dict)
+        {
+            var amountObj = dict.TryGetValue("amount", out var a) ? a : dict.TryGetValue("Amount", out var a2) ? a2 : null;
+            var currObj = dict.TryGetValue("currency", out var c) ? c : dict.TryGetValue("Currency", out var c2) ? c2 : null;
+            var amount = Convert.ToDecimal(UnwrapJsonElement(amountObj), CultureInfo.InvariantCulture);
+            var currency = Convert.ToString(UnwrapJsonElement(currObj), CultureInfo.InvariantCulture) ?? string.Empty;
+            if (currency.Length != 3)
+            {
+                throw new RecordValidationException($"Money field '{fieldName}' requires a 3-letter currency code.", fieldName);
+            }
+            return new MoneyValue(amount, currency.ToUpperInvariant());
+        }
+
+        throw new RecordValidationException($"Money field '{fieldName}' must be an object with 'amount' and 'currency'.", fieldName);
+    }
+
+    private static object? UnwrapJsonElement(object? value)
+    {
+        if (value is not JsonElement je)
+        {
+            return value;
+        }
+
+        return je.ValueKind switch
+        {
+            JsonValueKind.Null or JsonValueKind.Undefined => null,
+            JsonValueKind.String => je.GetString(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number => je.TryGetInt64(out var l) ? l : je.GetDecimal(),
+            _ => je
+        };
+    }
+
+    private static string CompileFilterNode(
+        FilterNode node,
+        ObjectDefinition objectDef,
+        DbCommand cmd,
+        ref int paramIndex)
+    {
+        switch (node)
+        {
+            case FilterGroup group:
+            {
+                if (group.Clauses.Count == 0)
+                {
+                    return "TRUE";
+                }
+
+                var op = group.Logical == LogicalOperator.Or ? " OR " : " AND ";
+                var parts = new List<string>(group.Clauses.Count);
+                foreach (var child in group.Clauses)
+                {
+                    parts.Add(CompileFilterNode(child, objectDef, cmd, ref paramIndex));
+                }
+                return $"({string.Join(op, parts)})";
+            }
+
+            case FilterCondition cond:
+            {
+                var (colName, fieldType) = ResolveFilterTargetColumn(cond.Field, objectDef);
+                var quotedCol = $"\"{colName}\"";
+
+                if (cond.Operator == FilterOperator.IsEmpty)
+                {
+                    return fieldType is FieldType.String or FieldType.Text or FieldType.Enum
+                        ? $"({quotedCol} IS NULL OR {quotedCol} = '')"
+                        : $"{quotedCol} IS NULL";
+                }
+
+                if (cond.Value is null)
+                {
+                    return cond.Operator switch
+                    {
+                        FilterOperator.Eq => $"{quotedCol} IS NULL",
+                        FilterOperator.Ne => $"{quotedCol} IS NOT NULL",
+                        _ => throw new RecordValidationException($"Null filter value is only valid with 'eq' or 'ne' on '{cond.Field}'.")
+                    };
+                }
+
+                if (cond.Operator == FilterOperator.In)
+                {
+                    if (cond.Value is not IEnumerable<object?> list)
+                    {
+                        throw new RecordValidationException($"Operator 'in' on '{cond.Field}' requires a list of values.");
+                    }
+
+                    var pNames = new List<string>();
+                    foreach (var item in list)
+                    {
+                        var pName = $"@f{paramIndex++}";
+                        AddParameter(cmd, pName, CoerceFilterParameter(item, fieldType, cond.Field));
+                        pNames.Add(pName);
+                    }
+
+                    return pNames.Count == 0 ? "FALSE" : $"{quotedCol} IN ({string.Join(", ", pNames)})";
+                }
+
+                var paramName = $"@f{paramIndex++}";
+                if (cond.Operator == FilterOperator.Contains)
+                {
+                    var text = Convert.ToString(UnwrapJsonElement(cond.Value), CultureInfo.InvariantCulture) ?? string.Empty;
+                    AddParameter(cmd, paramName, $"%{text}%");
+                    return $"{quotedCol} ILIKE {paramName}";
+                }
+
+                AddParameter(cmd, paramName, CoerceFilterParameter(cond.Value, fieldType, cond.Field));
+                var sqlOp = cond.Operator switch
+                {
+                    FilterOperator.Eq => "=",
+                    FilterOperator.Ne => "<>",
+                    FilterOperator.Gt => ">",
+                    FilterOperator.Ge => ">=",
+                    FilterOperator.Lt => "<",
+                    FilterOperator.Le => "<=",
+                    _ => throw new RecordValidationException($"Unsupported operator '{cond.Operator}'.")
+                };
+
+                return $"{quotedCol} {sqlOp} {paramName}";
+            }
+
+            default:
+                throw new RecordValidationException($"Unknown filter node type '{node.GetType().Name}'.");
+        }
+    }
+
+    private static (string ColumnName, FieldType Type) ResolveFilterTargetColumn(string fieldPath, ObjectDefinition objectDef)
+    {
+        var normalized = fieldPath.Trim();
+        switch (normalized.ToLowerInvariant())
+        {
+            case "id": return ("id", FieldType.Uuid);
+            case "tenantid" or "tenant_id": return ("tenant_id", FieldType.Uuid);
+            case "companyid" or "company_id": return ("company_id", FieldType.Uuid);
+            case "createdat" or "created_at": return ("created_at", FieldType.DateTime);
+            case "createdby" or "created_by": return ("created_by", FieldType.Uuid);
+            case "updatedat" or "updated_at": return ("updated_at", FieldType.DateTime);
+            case "updatedby" or "updated_by": return ("updated_by", FieldType.Uuid);
+            case "rowversion" or "row_version": return ("row_version", FieldType.Integer);
+        }
+
+        // Support filtering on money sub-properties, e.g. 'price.amount' or 'price.currency'
+        if (normalized.EndsWith(".amount", StringComparison.OrdinalIgnoreCase))
+        {
+            var baseName = normalized[..^7];
+            var moneyField = FindField(objectDef, baseName);
+            if (moneyField is { Type: FieldType.Money })
+            {
+                return ($"{moneyField.GetColumnName(objectDef.OwnerApp)}_amount", FieldType.Decimal);
+            }
+        }
+        else if (normalized.EndsWith(".currency", StringComparison.OrdinalIgnoreCase))
+        {
+            var baseName = normalized[..^9];
+            var moneyField = FindField(objectDef, baseName);
+            if (moneyField is { Type: FieldType.Money })
+            {
+                return ($"{moneyField.GetColumnName(objectDef.OwnerApp)}_currency", FieldType.String);
+            }
+        }
+
+        var field = FindField(objectDef, normalized)
+            ?? throw new RecordValidationException($"Unknown field '{fieldPath}' on object '{objectDef.Id}'.", fieldPath);
+
+        if (field.Type == FieldType.Money)
+        {
+            return ($"{field.GetColumnName(objectDef.OwnerApp)}_amount", FieldType.Decimal);
+        }
+
+        return (field.GetColumnName(objectDef.OwnerApp), field.Type);
+    }
+
+    private static object CoerceFilterParameter(object? rawValue, FieldType type, string fieldName)
+    {
+        var unwrapped = UnwrapJsonElement(rawValue)
+            ?? throw new RecordValidationException($"Filter value for '{fieldName}' cannot be null.", fieldName);
+
+        return type switch
+        {
+            FieldType.Uuid or FieldType.Reference or FieldType.Blob =>
+                unwrapped is Guid g ? g : Guid.Parse(Convert.ToString(unwrapped, CultureInfo.InvariantCulture)!),
+            FieldType.Integer =>
+                Convert.ToInt64(unwrapped, CultureInfo.InvariantCulture),
+            FieldType.Decimal =>
+                Convert.ToDecimal(unwrapped, CultureInfo.InvariantCulture),
+            FieldType.Boolean =>
+                Convert.ToBoolean(unwrapped, CultureInfo.InvariantCulture),
+            FieldType.Date =>
+                unwrapped is DateOnly d ? d : DateOnly.Parse(Convert.ToString(unwrapped, CultureInfo.InvariantCulture)!, CultureInfo.InvariantCulture),
+            FieldType.DateTime =>
+                unwrapped is DateTimeOffset dto ? dto.ToUniversalTime() : DateTimeOffset.Parse(Convert.ToString(unwrapped, CultureInfo.InvariantCulture)!, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToUniversalTime(),
+            _ => Convert.ToString(unwrapped, CultureInfo.InvariantCulture) ?? string.Empty
+        };
+    }
+
+    private static RecordData ReadRecord(
+        DbDataReader reader,
+        ObjectDefinition objectDef,
+        IReadOnlyList<string>? selectFields = null)
+    {
+        var selectSet = selectFields is { Count: > 0 }
+            ? new HashSet<string>(selectFields, StringComparer.OrdinalIgnoreCase)
+            : null;
+
+        var fields = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var field in objectDef.Fields)
+        {
+            var exposedName = GetExposedFieldName(field, objectDef.OwnerApp);
+            if (selectSet is not null
+                && !selectSet.Contains(field.Name)
+                && !selectSet.Contains(exposedName))
+            {
+                continue;
+            }
+
+            var colName = field.GetColumnName(objectDef.OwnerApp);
+            if (field.Type == FieldType.Money)
+            {
+                var amountOrd = reader.GetOrdinal($"{colName}_amount");
+                var currOrd = reader.GetOrdinal($"{colName}_currency");
+                if (reader.IsDBNull(amountOrd) || reader.IsDBNull(currOrd))
+                {
+                    fields[exposedName] = null;
+                }
+                else
+                {
+                    fields[exposedName] = new MoneyValue(
+                        reader.GetDecimal(amountOrd),
+                        reader.GetString(currOrd));
+                }
+                continue;
+            }
+
+            var ordinal = reader.GetOrdinal(colName);
+            if (reader.IsDBNull(ordinal))
+            {
+                fields[exposedName] = null;
+                continue;
+            }
+
+            fields[exposedName] = field.Type switch
+            {
+                FieldType.Date => reader.GetFieldValue<DateOnly>(ordinal).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                FieldType.DateTime => reader.GetFieldValue<DateTimeOffset>(ordinal),
+                FieldType.Json => JsonSerializer.Deserialize<object>(reader.GetString(ordinal)),
+                _ => reader.GetValue(ordinal)
+            };
+        }
+
+        return new RecordData
+        {
+            Id = reader.GetGuid(reader.GetOrdinal("id")),
+            TenantId = reader.GetGuid(reader.GetOrdinal("tenant_id")),
+            CompanyId = reader.IsDBNull(reader.GetOrdinal("company_id")) ? null : reader.GetGuid(reader.GetOrdinal("company_id")),
+            CreatedAt = reader.GetFieldValue<DateTimeOffset>(reader.GetOrdinal("created_at")),
+            CreatedBy = reader.GetGuid(reader.GetOrdinal("created_by")),
+            UpdatedAt = reader.GetFieldValue<DateTimeOffset>(reader.GetOrdinal("updated_at")),
+            UpdatedBy = reader.GetGuid(reader.GetOrdinal("updated_by")),
+            RowVersion = reader.GetInt64(reader.GetOrdinal("row_version")),
+            Fields = fields
+        };
+    }
+
+    private static void ValidateUnknownFields(IDictionary<string, object?> inputFields, ObjectDefinition objectDef)
+    {
+        foreach (var key in inputFields.Keys)
+        {
+            if (FindField(objectDef, key) is null)
+            {
+                throw new RecordValidationException($"Field '{key}' is not defined on object '{objectDef.Id}'.", key);
+            }
+        }
+    }
+
+    private static FieldDefinition? FindField(ObjectDefinition objectDef, string key)
+    {
+        return objectDef.Fields.FirstOrDefault(f =>
+            string.Equals(f.Name, key, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(GetExposedFieldName(f, objectDef.OwnerApp), key, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(f.GetColumnName(objectDef.OwnerApp), key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryGetFieldInput(
+        IDictionary<string, object?> input,
+        FieldDefinition field,
+        string objectOwnerApp,
+        out object? value)
+    {
+        foreach (var kvp in input)
+        {
+            if (string.Equals(kvp.Key, field.Name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(kvp.Key, GetExposedFieldName(field, objectOwnerApp), StringComparison.OrdinalIgnoreCase)
+                || string.Equals(kvp.Key, field.GetColumnName(objectOwnerApp), StringComparison.OrdinalIgnoreCase))
+            {
+                value = kvp.Value;
+                return true;
+            }
+        }
+
+        value = null;
+        return false;
+    }
+
+    private static string GetExposedFieldName(FieldDefinition field, string objectOwnerApp)
+    {
+        if (string.IsNullOrWhiteSpace(field.OwnerApp)
+            || string.Equals(field.OwnerApp, objectOwnerApp, StringComparison.OrdinalIgnoreCase))
+        {
+            return field.Name;
+        }
+
+        return $"{field.OwnerApp}.{field.Name}";
+    }
+
+    private async Task<T> ExecuteWithConnectionAsync<T>(
+        Func<DbConnection, DbTransaction?, Task<T>> action,
+        CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+        if (shouldClose)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        try
+        {
+            var currentTx = dbContext.Database.CurrentTransaction?.GetDbTransaction();
+            await using (var setCmd = connection.CreateCommand())
+            {
+                setCmd.Transaction = currentTx;
+                setCmd.CommandText = "/* erp:set_tenant_context */ SELECT set_config('app.tenant_id', @tenantId, false), set_config('app.user_id', @userId, false);";
+                AddParameter(setCmd, "tenantId", tenantContext.TenantId?.ToString("D") ?? string.Empty);
+                AddParameter(setCmd, "userId", tenantContext.UserId?.ToString("D") ?? string.Empty);
+                await setCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            return await action(connection, currentTx);
+        }
+        finally
+        {
+            if (shouldClose)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
+    private static DbCommand CreateCommand(DbConnection conn, DbTransaction? tx, string sql)
+    {
+        var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = sql;
+        return cmd;
+    }
+
+    private static void AddParameter(DbCommand cmd, string name, object value)
+    {
+        var p = cmd.CreateParameter();
+        p.ParameterName = name.StartsWith('@') ? name[1..] : name;
+        p.Value = value;
+        cmd.Parameters.Add(p);
+    }
+}

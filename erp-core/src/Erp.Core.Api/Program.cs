@@ -1,9 +1,13 @@
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json.Serialization;
 using Erp.Core.Api;
 using Erp.Core.Api.Auth;
+using Erp.Core.Api.Endpoints;
 using Erp.Core.Api.Middleware;
 using Erp.Core.Domain.Tenancy;
+using Erp.Core.Infrastructure.Data;
+using Erp.Core.Infrastructure.Metadata;
 using Erp.Core.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -11,11 +15,18 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
+
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
 
 builder.Services.AddScoped<ITenantContext, TenantContext>();
 builder.Services.AddScoped<TenantSessionInterceptor>();
 builder.Services.AddScoped<InternalTokenService>();
+builder.Services.AddScoped<MetadataRegistryService>();
+builder.Services.AddScoped<RecordDataService>();
 
 builder.Services.AddDbContext<CoreDbContext>((sp, options) =>
 {
@@ -228,6 +239,8 @@ v1.MapGet("/core/currencies", async (CoreDbContext db, CancellationToken ct) =>
 
 v1.MapGet("/core/users", async (CoreDbContext db, CancellationToken ct) =>
     Results.Ok(await db.Users.AsNoTracking().OrderBy(u => u.DisplayName).ToListAsync(ct)));
+
+v1.MapMetadataAndDataEndpoints();
 
 app.MapGet("/", () => Results.Content(LandingPageHtml.Content, "text/html; charset=utf-8"))
     .AllowAnonymous();

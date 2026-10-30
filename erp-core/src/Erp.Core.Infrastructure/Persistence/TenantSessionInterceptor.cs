@@ -5,9 +5,9 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 namespace Erp.Core.Infrastructure.Persistence;
 
 /// <summary>
-/// Ensures that the PostgreSQL session variable <c>app.tenant_id</c> is set before every
-/// database command according to the current <see cref="ITenantContext"/>, and cleared when
-/// the connection closes.
+/// Ensures that the PostgreSQL session variables <c>app.tenant_id</c> and <c>app.user_id</c>
+/// are set before every database command according to the current <see cref="ITenantContext"/>,
+/// and cleared when the connection closes.
 /// </summary>
 public sealed class TenantSessionInterceptor(ITenantContext tenantContext) : DbCommandInterceptor, IDbConnectionInterceptor
 {
@@ -108,12 +108,17 @@ public sealed class TenantSessionInterceptor(ITenantContext tenantContext) : DbC
     {
         var cmd = connection.CreateCommand();
         cmd.Transaction = transaction;
-        cmd.CommandText = $"{SetConfigMarker} SELECT set_config('app.tenant_id', @tenantId, false);";
+        cmd.CommandText = $"{SetConfigMarker} SELECT set_config('app.tenant_id', @tenantId, false), set_config('app.user_id', @userId, false);";
 
-        var parameter = cmd.CreateParameter();
-        parameter.ParameterName = "tenantId";
-        parameter.Value = tenantContext.TenantId?.ToString("D") ?? string.Empty;
-        cmd.Parameters.Add(parameter);
+        var tenantParam = cmd.CreateParameter();
+        tenantParam.ParameterName = "tenantId";
+        tenantParam.Value = tenantContext.TenantId?.ToString("D") ?? string.Empty;
+        cmd.Parameters.Add(tenantParam);
+
+        var userParam = cmd.CreateParameter();
+        userParam.ParameterName = "userId";
+        userParam.Value = tenantContext.UserId?.ToString("D") ?? string.Empty;
+        cmd.Parameters.Add(userParam);
 
         return cmd;
     }
@@ -128,7 +133,7 @@ public sealed class TenantSessionInterceptor(ITenantContext tenantContext) : DbC
         try
         {
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"{SetConfigMarker} SELECT set_config('app.tenant_id', '', false);";
+            cmd.CommandText = $"{SetConfigMarker} SELECT set_config('app.tenant_id', '', false), set_config('app.user_id', '', false);";
             cmd.ExecuteNonQuery();
         }
         catch
@@ -147,7 +152,7 @@ public sealed class TenantSessionInterceptor(ITenantContext tenantContext) : DbC
         try
         {
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"{SetConfigMarker} SELECT set_config('app.tenant_id', '', false);";
+            cmd.CommandText = $"{SetConfigMarker} SELECT set_config('app.tenant_id', '', false), set_config('app.user_id', '', false);";
             await cmd.ExecuteNonQueryAsync();
         }
         catch
@@ -156,4 +161,3 @@ public sealed class TenantSessionInterceptor(ITenantContext tenantContext) : DbC
         }
     }
 }
-
