@@ -211,6 +211,38 @@ message StartWorkflowResponse {
 
 service DocumentService {
   rpc GetDocument (GetDocumentRequest) returns (GetDocumentResponse);
+
+  // Inbox items: an app claims an item, processes it, and completes or rejects it. Claiming is atomic.
+  rpc ClaimInboxItem (InboxItemActionRequest) returns (InboxItemProto);
+  rpc ReleaseInboxItem (InboxItemActionRequest) returns (InboxItemProto);
+  rpc CompleteInboxItem (InboxItemActionRequest) returns (InboxItemProto);
+  rpc RejectInboxItem (InboxItemActionRequest) returns (InboxItemProto);
+}
+
+message InboxItemActionRequest {
+  CallContextProto context = 1;
+  string item_id = 2;
+  // Identifies the claiming app (e.g. "finance.invoiceinterpreter"); the item is claimed as "app:<claimant>".
+  string claimant = 3;
+  // Complete: the object the item resulted in.
+  string result_object_id = 4;
+  string result_record_id = 5;
+  // Reject: why.
+  string reason = 6;
+}
+
+message InboxItemProto {
+  string id = 1;
+  string inbox_id = 2;
+  string company_id = 3;
+  string channel = 4;
+  string sender = 5;
+  string subject = 6;
+  string body_text = 7;
+  string status = 8;
+  repeated string file_ids = 9;
+  repeated string duplicate_file_ids = 10;
+  string claimed_by = 11;
 }
 
 message GetDocumentRequest {

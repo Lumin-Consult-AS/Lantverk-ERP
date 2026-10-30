@@ -5,6 +5,7 @@ using Erp.Core.Domain.Apps;
 using Erp.Core.Domain.Data;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Data;
+using Erp.Core.Infrastructure.Documents;
 using Erp.Core.Infrastructure.Events;
 using Erp.Core.Infrastructure.Persistence;
 using Erp.Core.Infrastructure.Security;
@@ -68,11 +69,13 @@ public sealed class AttentionService(
     CoreDbContext dbContext,
     ITenantContext tenantContext,
     WorkflowEngine workflowEngine,
+    InboxService inbox,
     RecordDataService recordData,
     PermissionService permissions,
     AttentionCache cache)
 {
     public const string OpenTasksId = "core.task.mine";
+    public const string InboxNewId = "core.inbox.new";
 
     public async Task<IReadOnlyList<AttentionItem>> GetAsync(CancellationToken cancellationToken)
     {
@@ -86,6 +89,15 @@ public sealed class AttentionService(
         if (taskCount > 0)
         {
             items.Add(Build(OpenTasksId, "Til godkjenning", "action", taskCount, null, "core.tasks", null, dismissals));
+        }
+
+        if (await permissions.IsGrantedAsync("core.inboxitem", "read", cancellationToken))
+        {
+            var newItems = await CountCachedAsync(tenantId, userId, InboxNewId, () => inbox.CountNewAsync(cancellationToken));
+            if (newItems > 0)
+            {
+                items.Add(Build(InboxNewId, "Nye dokumenter i innboksen", "warning", newItems, null, "core.inbox", null, dismissals));
+            }
         }
 
         var apps = await dbContext.InstalledApps.AsNoTracking().OrderBy(a => a.CreatedAt).ToListAsync(cancellationToken);

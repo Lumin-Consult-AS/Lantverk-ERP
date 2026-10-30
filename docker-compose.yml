@@ -50,6 +50,28 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  # Document services are only needed for files, the inbox and PDF generation, so they sit behind a profile:
+  #   docker compose --profile documents up -d
+  # Virus scanning of every uploaded and received file (ClamAV daemon on 3310).
+  # The official image is published for amd64 only; on ARM machines it runs emulated (slow to start, signatures
+  # take a few minutes to load before the scanner answers).
+  clamav:
+    image: clamav/clamav:stable
+    platform: linux/amd64
+    container_name: erp-clamav
+    profiles: ["documents"]
+    ports:
+      - "3310:3310"
+
+  # HTML -> PDF (headless Chromium). Untested image build: needs the Playwright base image to be reachable.
+  pdf-renderer:
+    build:
+      context: ./erp-core/tools/pdf-renderer
+    container_name: erp-pdf-renderer
+    profiles: ["documents"]
+    ports:
+      - "3000:3000"
+
   erp-core:
     build:
       context: ./erp-core
@@ -68,6 +90,15 @@ services:
       Auth__OidcAuthority: "http://keycloak:8080/realms/erp-dev"
       Auth__OidcAudience: "erp-web"
       Auth__RequireHttpsMetadata: "false"
+      Email__SmtpHost: "mailpit"
+      Email__SmtpPort: "1025"
+      ClamAv__Host: "clamav"
+      PdfRenderer__BaseUrl: "http://pdf-renderer:3000"
+      Storage__ServiceUrl: "http://minio:9000"
+      Storage__AccessKey: "erp_minio"
+      Storage__SecretKey: "erp_minio_dev_password"
+      Storage__ForcePathStyle: "true"
+      Storage__CreateBucketIfMissing: "true"
     ports:
       - "5000:8080"
 

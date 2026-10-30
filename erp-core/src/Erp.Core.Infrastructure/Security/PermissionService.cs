@@ -249,8 +249,36 @@ public sealed class PermissionService(CoreDbContext dbContext, ITenantContext te
             .Select(a => a.PermissionSetsJson)
             .ToListAsync(cancellationToken);
 
-        return json
-            .SelectMany(j => JsonSerializer.Deserialize<List<PermissionSetDefinition>>(j, JsonOptions) ?? [])
+        return CorePermissionSets.All
+            .Concat(json.SelectMany(j => JsonSerializer.Deserialize<List<PermissionSetDefinition>>(j, JsonOptions) ?? []))
             .ToList();
     }
+}
+
+/// <summary>
+/// Permission sets owned by the core itself (documents), available in every tenant without installing an app.
+/// They are granted to roles like any other set (ADR-0011, ADR-0012).
+/// </summary>
+public static class CorePermissionSets
+{
+    private static readonly string[] Documents = ["core.file", "core.inbox", "core.inboxitem", "core.attachment"];
+
+    public static IReadOnlyList<PermissionSetDefinition> All { get; } =
+    [
+        new()
+        {
+            Id = "core.documents.reader",
+            OwnerApp = "core",
+            Label = "Dokumenter – lesetilgang",
+            Grants = Documents.ToDictionary(o => o, _ => new List<string> { "read" }, StringComparer.OrdinalIgnoreCase)
+        },
+        new()
+        {
+            Id = "core.documents.user",
+            OwnerApp = "core",
+            Label = "Dokumenter – full tilgang",
+            Grants = Documents.ToDictionary(
+                o => o, _ => new List<string> { "read", "create", "update", "delete" }, StringComparer.OrdinalIgnoreCase)
+        }
+    ];
 }

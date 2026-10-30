@@ -22,6 +22,9 @@ public sealed class ErpApiClient(HttpClient httpClient, I18nService i18n)
 
     public ClientTokenResponse? CurrentAuth { get; private set; }
     public ClientSessionInfo? CurrentSession { get; private set; }
+    /// <summary>The API this client talks to (shown in error messages so a wrong address is easy to spot).</summary>
+    public Uri? ApiAddress => httpClient.BaseAddress;
+
     public Guid ActiveCompanyId => CurrentSession?.Company?.Id ?? CurrentAuth?.CompanyId ?? Guid.Empty;
 
     public event Action? OnStateChanged;
@@ -387,4 +390,31 @@ public sealed class ErpApiClient(HttpClient httpClient, I18nService i18n)
 
     public async Task<IReadOnlyList<ClientUserSummary>> GetUsersAsync(CancellationToken ct = default) =>
         await httpClient.GetFromJsonAsync<List<ClientUserSummary>>("/api/v1/core/users", JsonOptions, ct) ?? [];
+
+    // ------------------------------------------------------------------ documents and inbox
+
+    public async Task<IReadOnlyList<ClientInboxItem>> GetInboxItemsAsync(string? status = "new", CancellationToken ct = default) =>
+        await httpClient.GetFromJsonAsync<List<ClientInboxItem>>(
+            "/api/v1/inbox/items?top=100" + (string.IsNullOrWhiteSpace(status) ? string.Empty : $"&status={Uri.EscapeDataString(status)}"),
+            JsonOptions,
+            ct) ?? [];
+
+    public async Task<ClientInboxItemDetail?> GetInboxItemAsync(Guid itemId, CancellationToken ct = default) =>
+        await httpClient.GetFromJsonAsync<ClientInboxItemDetail>($"/api/v1/inbox/items/{itemId:D}", JsonOptions, ct);
+
+    public async Task AttachInboxItemAsync(Guid itemId, string objectId, Guid recordId, string category, CancellationToken ct = default)
+    {
+        using var res = await httpClient.PostAsJsonAsync(
+            $"/api/v1/inbox/items/{itemId:D}/attach", new { objectId, recordId, category }, JsonOptions, ct);
+        await EnsureSuccessOrThrowReadableAsync(res, ct);
+    }
+
+    public async Task RejectInboxItemAsync(Guid itemId, string? reason, CancellationToken ct = default)
+    {
+        using var res = await httpClient.PostAsJsonAsync($"/api/v1/inbox/items/{itemId:D}/reject", new { reason }, JsonOptions, ct);
+        await EnsureSuccessOrThrowReadableAsync(res, ct);
+    }
+
+    public async Task<byte[]> DownloadFileAsync(Guid fileId, CancellationToken ct = default) =>
+        await httpClient.GetByteArrayAsync($"/api/v1/files/{fileId:D}/content", ct);
 }

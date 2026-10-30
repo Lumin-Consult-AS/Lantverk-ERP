@@ -3,6 +3,8 @@ using Erp.Core.Domain.Data;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Apps;
 using Erp.Core.Infrastructure.Data;
+using Erp.Core.Infrastructure.Documents;
+using Erp.Core.Infrastructure.Security;
 using Erp.Core.Infrastructure.Events;
 using Erp.Sdk.Contracts.V1;
 using Google.Protobuf;
@@ -336,22 +338,102 @@ public sealed class CoreWorkflowGrpcService(
 public sealed class CoreDocumentGrpcService(
     IInternalTokenIssuer tokenIssuer,
     ITenantContext tenantContext,
-    ActiveCallTransactionRegistry txRegistry) : DocumentService.DocumentServiceBase
+    ActiveCallTransactionRegistry txRegistry,
+    FileService files,
+    InboxService inbox,
+    PermissionService permissions) : DocumentService.DocumentServiceBase
 {
-    public override Task<GetDocumentResponse> GetDocument(GetDocumentRequest request, ServerCallContext context)
+    public override async Task<GetDocumentResponse> GetDocument(GetDocumentRequest request, ServerCallContext context)
     {
-        using var scope = GrpcCallContextHelper.AuthenticateAndBeginScope(
-            request.Context,
-            context,
-            tokenIssuer,
-            tenantContext,
-            txRegistry,
-            out _);
+        using var scope = Authenticate(request.Context, context);
+        await permissions.RequireAsync("core.file", "read", context.CancellationToken);
 
-        return Task.FromResult(new GetDocumentResponse
+        if (!Guid.TryParse(request.FileId, out var fileId))
         {
-            Found = false,
-            Content = ByteString.Empty
-        });
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid file_id UUID."));
+        }
+
+        try
+        {
+            var (file, content) = await files.ReadContentAsync(fileId, context.CancellationToken);
+            return new GetDocumentResponse
+            {
+                Found = true,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                Content = ByteString.CopyFrom(content),
+                Sha256 = file.Sha256
+            };
+        }
+        catch (KeyNotFoundException)
+        {
+            return new GetDocumentResponse { Found = false, Content = ByteString.Empty };
+        }
     }
+
+    public override Task<InboxItemProto> ClaimInboxItem(InboxItemActionRequest request, ServerCallContext context) =>
+        ActAsync(request, context, (item, by, ct) => inbox.ClaimAsync(item, by, ct));
+
+    public override Task<InboxItemProto> ReleaseInboxItem(InboxItemActionRequest request, ServerCallContext context) =>
+        ActAsync(request, context, (item, by, ct) => inbox.ReleaseAsync(item, by, ct));
+
+    public override Task<InboxItemProto> CompleteInboxItem(InboxItemActionRequest request, ServerCallContext context) =>
+        ActAsync(
+            request,
+            context,
+            (item, by, ct) => inbox.CompleteAsync(
+                item,
+                by,
+                string.IsNullOrWhiteSpace(request.ResultObjectId) ? null : request.ResultObjectId,
+                Guid.TryParse(request.ResultRecordId, out var recordId) ? recordId : null,
+                ct));
+
+    public override Task<InboxItemProto> RejectInboxItem(InboxItemActionRequest request, ServerCallContext context) =>
+        ActAsync(request, context, (item, by, ct) => inbox.RejectAsync(item, by, request.Reason, ct));
+
+    private async Task<InboxItemProto> ActAsync(
+        InboxItemActionRequest request,
+        ServerCallContext context,
+        Func<Guid, string, CancellationToken, Task<InboxItemInfo>> action)
+    {
+        using var scope = Authenticate(request.Context, context);
+        await permissions.RequireAsync("core.inboxitem", "update", context.CancellationToken);
+
+        if (!Guid.TryParse(request.ItemId, out var itemId))
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid item_id UUID."));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Claimant))
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "claimant (the app id) is required."));
+        }
+
+        try
+        {
+            var item = await action(itemId, $"app:{request.Claimant.Trim()}", context.CancellationToken);
+            var proto = new InboxItemProto
+            {
+                Id = item.Id.ToString("D"),
+                InboxId = item.InboxId.ToString("D"),
+                CompanyId = item.CompanyId?.ToString("D") ?? string.Empty,
+                Channel = item.Channel,
+                Sender = item.Sender,
+                Subject = item.Subject,
+                BodyText = item.BodyText ?? string.Empty,
+                Status = item.Status,
+                ClaimedBy = item.ClaimedBy ?? string.Empty
+            };
+            proto.FileIds.AddRange(item.FileIds.Select(id => id.ToString("D")));
+            proto.DuplicateFileIds.AddRange(item.DuplicateFileIds.Select(id => id.ToString("D")));
+            return proto;
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new RpcException(new Status(StatusCode.NotFound, ex.Message));
+        }
+    }
+
+    private IDisposable Authenticate(CallContextProto? callContext, ServerCallContext context) =>
+        GrpcCallContextHelper.AuthenticateAndBeginScope(callContext, context, tokenIssuer, tenantContext, txRegistry, out _);
 }
