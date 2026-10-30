@@ -1,0 +1,86 @@
+@inject ErpApiClient Api
+@inject I18nService I18n
+@inject NavigationManager Nav
+
+<MudPaper Elevation="2" Class="pa-4" data-page-id="@Page.Id" data-page-type="worklist">
+    <div class="d-flex align-center justify-space-between mb-3">
+        <MudText Typo="Typo.h5">@I18n.T(Page.Title, Page.Id)</MudText>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="@LoadItemsAsync">
+            @I18n.T("ui.action.refresh")
+        </MudButton>
+    </div>
+
+    @if (_records.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info">@I18n.T("ui.status.worklistEmpty")</MudAlert>
+    }
+    else
+    {
+        <MudSimpleTable Hover="true" Dense="true" Bordered="true">
+            <thead>
+                <tr>
+                    @foreach (var col in VisibleColumns)
+                    {
+                        <th>@I18n.T($"parties.fields.{col}", col)</th>
+                    }
+                    <th style="width: 120px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var rec in _records)
+                {
+                    <tr data-record-id="@rec.Id">
+                        @foreach (var col in VisibleColumns)
+                        {
+                            <td>@(rec.Fields.TryGetValue(col, out var v) ? I18nService.UnwrapDisplayString(v) : string.Empty)</td>
+                        }
+                        <td>
+                            @if (Page.Actions.Count > 0)
+                            {
+                                var primaryAction = Page.Actions[0];
+                                <MudButton Size="Size.Small"
+                                           Variant="Variant.Filled"
+                                           Color="Color.Primary"
+                                           OnClick="@(() => ExecuteWorklistActionAsync(rec, primaryAction))">
+                                    @I18n.T(primaryAction.Label, primaryAction.Label)
+                                </MudButton>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public ClientPageDefinition Page { get; set; } = default!;
+    [Parameter] public ClientObjectDefinition? ObjectDefinition { get; set; }
+
+    private List<ClientRecordData> _records = [];
+
+    private IReadOnlyList<string> VisibleColumns =>
+        Page.Columns.Count > 0
+            ? Page.Columns
+            : ObjectDefinition?.Fields.Select(f => f.Name).ToList() ?? [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadItemsAsync();
+    }
+
+    public async Task LoadItemsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Page.Object)) return;
+        var rows = await Api.QueryRecordsAsync(Page.Object);
+        _records = rows.ToList();
+    }
+
+    private async Task ExecuteWorklistActionAsync(ClientRecordData record, ClientPageAction action)
+    {
+        if (string.IsNullOrWhiteSpace(action.Transition)) return;
+        await Api.ExecuteTransitionAsync(Page.Object, record.Id, action.Transition, record.RowVersion);
+        await LoadItemsAsync();
+    }
+}
+

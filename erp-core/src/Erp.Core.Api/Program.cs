@@ -140,6 +140,15 @@ builder.Services.AddAuthorizationBuilder()
         policy.RequireAuthenticatedUser();
     });
 
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .WithExposedHeaders("ETag"));
+});
+
 var app = builder.Build();
 
 if (app.Configuration.GetValue<bool>("Database:AutoMigrateAndSeed"))
@@ -156,6 +165,7 @@ if (app.Configuration.GetValue<bool>("Database:AutoMigrateAndSeed"))
     await DemoTenantSeeder.SeedAsync(db, tenantContext);
 }
 
+app.UseCors();
 app.UseAuthentication();
 app.UseMiddleware<TenantContextMiddleware>();
 app.UseAuthorization();
@@ -175,6 +185,33 @@ app.MapPost("/api/v1/auth/token", async (
             : Results.Forbid();
     })
     .RequireAuthorization("ExternalOidcPolicy");
+
+app.MapPost("/api/v1/auth/dev-login", async (
+        IHostEnvironment env,
+        IConfiguration config,
+        InternalTokenService tokenService,
+        DevLoginRequest? request,
+        CancellationToken cancellationToken) =>
+    {
+        if (!env.IsDevelopment() && !config.GetValue<bool>("Auth:EnableDevLogin"))
+        {
+            return Results.NotFound();
+        }
+
+        var subject = string.IsNullOrWhiteSpace(request?.Subject)
+            ? DemoTenantSeeder.DemoUserSubject
+            : request.Subject;
+
+        var identity = new ClaimsIdentity([new Claim("sub", subject)], "DevLogin");
+        var principal = new ClaimsPrincipal(identity);
+        var exchanged = await tokenService.ExchangeTokenAsync(
+            principal,
+            new TokenExchangeRequest(request?.CompanyId, request?.TenantSlug),
+            cancellationToken);
+
+        return exchanged is not null ? Results.Ok(exchanged) : Results.Forbid();
+    })
+    .AllowAnonymous();
 
 var v1 = app.MapGroup("/api/v1").RequireAuthorization();
 
@@ -255,5 +292,7 @@ app.MapGet("/", () => Results.Content(LandingPageHtml.Content, "text/html; chars
     .AllowAnonymous();
 
 app.Run();
+
+public sealed record DevLoginRequest(string? Subject = null, string? TenantSlug = null, Guid? CompanyId = null);
 
 public partial class Program;

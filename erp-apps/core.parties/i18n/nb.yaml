@@ -14,5 +14,11 @@ parties:
     organizationNumber: Organisasjonsnummer
     email: E-post
     phone: Telefon
+    status: Status
     isActive: Aktiv
+  actions:
+    deactivate: Deaktiver
+    activate: Aktiver
+    block: Sperr part
+    unblock: Opphev sperring
 

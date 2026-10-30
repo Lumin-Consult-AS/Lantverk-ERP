@@ -1,0 +1,105 @@
+@page "/page/{PageId}"
+@page "/page/{PageId}/new"
+@page "/page/{PageId}/{RecordId:guid}"
+@inject ErpApiClient Api
+@inject I18nService I18n
+@implements IDisposable
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="my-4" />
+}
+else if (_page is null)
+{
+    <MudAlert Severity="Severity.Warning">Fant ikke sidedefinisjon '@PageId'.</MudAlert>
+}
+else if (_objectDef is null)
+{
+    <MudAlert Severity="Severity.Warning">Fant ikke objektmetadata '@_page.Object' for side '@PageId'.</MudAlert>
+}
+else if (string.Equals(_page.Type, "list", StringComparison.OrdinalIgnoreCase))
+{
+    <DeclarativeListView Page="@_page"
+                         ObjectDefinition="@_objectDef"
+                         CompanionCardPageId="@_companionCardPageId" />
+}
+else if (string.Equals(_page.Type, "card", StringComparison.OrdinalIgnoreCase))
+{
+    <DeclarativeCardView Page="@_page"
+                         ObjectDefinition="@_objectDef"
+                         AllObjectsById="@_objectsById"
+                         EnumsById="@_enumsById"
+                         RecordId="@RecordId"
+                         CompanionListPageId="@_companionListPageId" />
+}
+else if (string.Equals(_page.Type, "worklist", StringComparison.OrdinalIgnoreCase))
+{
+    <DeclarativeWorklistView Page="@_page"
+                             ObjectDefinition="@_objectDef" />
+}
+else if (string.Equals(_page.Type, "dialog", StringComparison.OrdinalIgnoreCase))
+{
+    <DeclarativeDialogModal IsOpen="true"
+                            Title="@I18n.T(_page.Title, _objectDef.Label)"
+                            ObjectDefinition="@_objectDef"
+                            EnumsById="@_enumsById" />
+}
+
+@code {
+    [Parameter] public string PageId { get; set; } = string.Empty;
+    [Parameter] public Guid? RecordId { get; set; }
+
+    private bool _loading = true;
+    private ClientPageDefinition? _page;
+    private ClientObjectDefinition? _objectDef;
+    private Dictionary<string, ClientObjectDefinition> _objectsById = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, ClientEnumDefinition> _enumsById = new(StringComparer.OrdinalIgnoreCase);
+    private string? _companionCardPageId;
+    private string? _companionListPageId;
+
+    protected override void OnInitialized()
+    {
+        I18n.OnLocaleChanged += StateHasChanged;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        try
+        {
+            if (Api.CurrentAuth is null)
+            {
+                await Api.DevLoginAsync();
+            }
+
+            var allPages = await Api.GetPagesAsync();
+            var allObjects = await Api.GetObjectsAsync();
+            var allEnums = await Api.GetEnumsAsync();
+
+            _objectsById = allObjects.ToDictionary(o => o.Id, StringComparer.OrdinalIgnoreCase);
+            _enumsById = allEnums.ToDictionary(e => e.Id, StringComparer.OrdinalIgnoreCase);
+            _page = allPages.FirstOrDefault(p => string.Equals(p.Id, PageId, StringComparison.OrdinalIgnoreCase));
+
+            if (_page is not null)
+            {
+                _objectsById.TryGetValue(_page.Object, out _objectDef);
+                _companionCardPageId = allPages.FirstOrDefault(p =>
+                    string.Equals(p.Object, _page.Object, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(p.Type, "card", StringComparison.OrdinalIgnoreCase))?.Id;
+                _companionListPageId = allPages.FirstOrDefault(p =>
+                    string.Equals(p.Object, _page.Object, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(p.Type, "list", StringComparison.OrdinalIgnoreCase))?.Id;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLocaleChanged -= StateHasChanged;
+    }
+}
+

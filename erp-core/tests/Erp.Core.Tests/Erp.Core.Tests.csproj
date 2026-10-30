@@ -10,6 +10,7 @@
     <ProjectReference Include="..\..\src\Erp.Core.Domain\Erp.Core.Domain.csproj" />
     <ProjectReference Include="..\..\src\Erp.Core.Infrastructure\Erp.Core.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Erp.Core.Api\Erp.Core.Api.csproj" />
+    <ProjectReference Include="..\..\..\erp-client\src\Erp.Client\Erp.Client.csproj" />
   </ItemGroup>
 
   <ItemGroup>

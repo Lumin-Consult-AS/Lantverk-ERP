@@ -104,6 +104,39 @@ public static class AppManagementEndpoints
             }
         });
 
+        v1.MapPost("/apps/install-builtin/{appId}", async (
+            string appId,
+            AppInstallationService appService,
+            CancellationToken ct) =>
+        {
+            var appDir = ResolveBuiltInAppDirectory(appId);
+            if (appDir is null)
+            {
+                return Results.NotFound(new { error = $"Built-in app package '{appId}' was not found." });
+            }
+
+            try
+            {
+                var zipBytes = AppPackageFormat.CreateSignedZipFromDirectory(appDir);
+                var installed = await appService.InstallPackageAsync(zipBytes, null, ct);
+                return Results.Ok(new
+                {
+                    installed.Id,
+                    installed.AppId,
+                    installed.Version,
+                    installed.Name,
+                    installed.Publisher,
+                    installed.IsDeclarative,
+                    installed.PackageSha256,
+                    installed.PackageStorageKey
+                });
+            }
+            catch (AppManifestValidationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message, errors = ex.Errors });
+            }
+        });
+
         v1.MapDelete("/apps/{appId}", async (
             string appId,
             AppInstallationService appService,
@@ -131,6 +164,18 @@ public static class AppManagementEndpoints
 
         v1.MapGet("/metadata/pages", async (AppInstallationService appService, CancellationToken ct) =>
             Results.Ok(await appService.GetEffectivePagesAsync(ct)));
+
+        v1.MapGet("/metadata/pages/{pageId}", async (string pageId, AppInstallationService appService, CancellationToken ct) =>
+        {
+            var pages = await appService.GetEffectivePagesAsync(ct);
+            var page = pages.FirstOrDefault(p => string.Equals(p.Id, pageId, StringComparison.OrdinalIgnoreCase));
+            return page is not null
+                ? Results.Ok(page)
+                : Results.NotFound(new { error = $"Page '{pageId}' was not found." });
+        });
+
+        v1.MapGet("/metadata/i18n/{locale}", async (string locale, AppInstallationService appService, CancellationToken ct) =>
+            Results.Ok(await appService.GetTranslationsAsync(locale, ct)));
 
         v1.MapGet("/metadata/permissions", async (AppInstallationService appService, CancellationToken ct) =>
             Results.Ok(await appService.GetPermissionSetsAsync(ct)));
@@ -161,6 +206,37 @@ public static class AppManagementEndpoints
             {
                 return candidate;
             }
+            dir = dir.Parent;
+        }
+
+        return null;
+    }
+
+    private static string? ResolveBuiltInAppDirectory(string appId)
+    {
+        if (string.IsNullOrWhiteSpace(appId)
+            || appId.Contains("..", StringComparison.Ordinal)
+            || appId.Contains('/')
+            || appId.Contains('\\'))
+        {
+            return null;
+        }
+
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var candidateApps = Path.Combine(dir.FullName, "erp-apps", appId);
+            if (Directory.Exists(candidateApps))
+            {
+                return candidateApps;
+            }
+
+            var candidateSamples = Path.Combine(dir.FullName, "erp-samples", appId);
+            if (Directory.Exists(candidateSamples))
+            {
+                return candidateSamples;
+            }
+
             dir = dir.Parent;
         }
 
