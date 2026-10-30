@@ -122,9 +122,35 @@ public sealed class AppHostAndSdkTests(PostgresDatabaseFixture fixture)
             using var deleteRes = await coreHttpClient.SendAsync(deleteReq);
             Assert.Equal(HttpStatusCode.NoContent, deleteRes.StatusCode);
 
-            // 6. Verify all contact notes for the deleted party were deleted by OnPartyDeleted
-            var notesAfterDelete = await api.QueryRecordsAsync("demo.contactnote", filter: $"party eq '{party.Id:D}'");
+            // 6. Events are delivered asynchronously from the outbox; wait until OnPartyDeleted has removed the notes
+            var notesAfterDelete = await EventBusTestHelpers.WaitForAsync(
+                () => api.QueryRecordsAsync("demo.contactnote", filter: $"party eq '{party.Id:D}'"),
+                notes => notes.Count == 0);
             Assert.Empty(notesAfterDelete);
+
+            // 7. The event is in the log with a delivery to demo.contacts, and can be replayed to the app
+            using var eventsDoc = JsonDocument.Parse(await coreHttpClient.GetStringAsync("/api/v1/events?name=core.party.deleted@1"));
+            var deletedEvent = Assert.Single(
+                eventsDoc.RootElement.EnumerateArray(),
+                e => e.GetProperty("aggregateId").GetString() == party.Id.ToString("D"));
+            var deletedEventId = deletedEvent.GetProperty("id").GetGuid();
+
+            using var replayRes = await coreHttpClient.PostAsJsonAsync(
+                $"/api/v1/events/{deletedEventId}/replay",
+                new { app = "demo.contacts" });
+            Assert.Equal(HttpStatusCode.Accepted, replayRes.StatusCode);
+
+            var detail = await EventBusTestHelpers.WaitForAsync(
+                async () => JsonDocument.Parse(await coreHttpClient.GetStringAsync($"/api/v1/events/{deletedEventId}")),
+                d => d.RootElement.GetProperty("deliveries").EnumerateArray().Count(x => x.GetProperty("status").GetString() == "delivered") == 2);
+            var deliveries = detail.RootElement.GetProperty("deliveries").EnumerateArray().ToList();
+            Assert.Equal(2, deliveries.Count);
+            Assert.All(deliveries, d =>
+            {
+                Assert.Equal("demo.contacts|OnPartyDeleted", d.GetProperty("subscriberKey").GetString());
+                Assert.Equal("delivered", d.GetProperty("status").GetString());
+            });
+            Assert.Single(deliveries, d => d.GetProperty("isReplay").GetBoolean());
         }
         finally
         {

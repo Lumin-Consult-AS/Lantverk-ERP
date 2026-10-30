@@ -8,6 +8,7 @@ using Erp.Core.Api.Grpc;
 using Erp.Core.Api.Middleware;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Apps;
+using Erp.Core.Infrastructure.Events;
 using Erp.Core.Infrastructure.Data;
 using Erp.Core.Infrastructure.Metadata;
 using Erp.Core.Infrastructure.Persistence;
@@ -32,6 +33,12 @@ builder.Services.AddSingleton<KubernetesAppOrchestrator>();
 builder.Services.AddSingleton<ActiveCallTransactionRegistry>();
 builder.Services.AddSingleton<AppHostOptions>();
 builder.Services.AddScoped<AppHostService>();
+builder.Services.AddSingleton<EventBusOptions>();
+builder.Services.AddSingleton<EventDeliveryWakeSignal>();
+builder.Services.AddScoped<EventPublisher>();
+builder.Services.AddScoped<EventLogService>();
+builder.Services.AddHttpClient(EventDeliveryWorker.WebhookHttpClientName);
+builder.Services.AddHostedService<EventDeliveryWorker>();
 builder.Services.AddScoped<MetadataRegistryService>();
 builder.Services.AddScoped<RecordDataService>();
 builder.Services.AddSingleton<IAppPackageStorage>(_ => new LocalAppPackageStorage());
@@ -294,6 +301,7 @@ v1.MapGet("/core/users", async (CoreDbContext db, CancellationToken ct) =>
 
 v1.MapMetadataAndDataEndpoints();
 v1.MapAppManagementEndpoints();
+v1.MapEventEndpoints();
 
 app.MapGrpcService<CoreDataGrpcService>();
 app.MapGrpcService<CoreEventGrpcService>();

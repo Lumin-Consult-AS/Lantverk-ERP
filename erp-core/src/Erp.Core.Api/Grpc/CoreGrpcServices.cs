@@ -3,6 +3,7 @@ using Erp.Core.Domain.Data;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Apps;
 using Erp.Core.Infrastructure.Data;
+using Erp.Core.Infrastructure.Events;
 using Erp.Sdk.Contracts.V1;
 using Google.Protobuf;
 using Grpc.Core;
@@ -282,7 +283,7 @@ public sealed class CoreDataGrpcService(
 }
 
 public sealed class CoreEventGrpcService(
-    AppHostService appHostService,
+    EventPublisher eventPublisher,
     IInternalTokenIssuer tokenIssuer,
     ITenantContext tenantContext,
     ActiveCallTransactionRegistry txRegistry) : EventService.EventServiceBase
@@ -297,16 +298,16 @@ public sealed class CoreEventGrpcService(
             txRegistry,
             out var companyId);
 
-        var eventId = Guid.NewGuid().ToString("D");
-        await appHostService.DeliverEventToSubscribersAsync(
+        // Apps publish through the same transactional outbox as the core (ADR-0009).
+        var eventId = await eventPublisher.PublishInOwnTransactionAsync(
             request.EventName,
+            string.IsNullOrWhiteSpace(request.AggregateId) ? request.EventName : request.AggregateId,
             request.PayloadJson,
             companyId,
             request.Context?.CorrelationId,
-            eventId,
             context.CancellationToken);
 
-        return new PublishEventResponse { EventId = eventId };
+        return new PublishEventResponse { EventId = eventId.ToString("D") };
     }
 }
 
