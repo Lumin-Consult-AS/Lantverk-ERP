@@ -14,18 +14,30 @@
 
     <MudItem xs="12" md="5">
         <MudPaper Elevation="2" Class="pa-4 mb-4">
-            <div class="d-flex align-center justify-space-between mb-3">
+            <div class="d-flex flex-wrap align-center justify-space-between mb-3 gap-2">
                 <MudText Typo="Typo.h6">@I18n.T("ui.nav.apps")</MudText>
-                @if (!IsCorePartiesInstalled)
-                {
-                    <MudButton Variant="Variant.Filled"
-                               Color="Color.Primary"
-                               Size="Size.Small"
-                               OnClick="@InstallCorePartiesAsync"
-                               data-action="install-core-parties">
-                        @I18n.T("ui.action.installCoreParties")
-                    </MudButton>
-                }
+                <div class="d-flex gap-1">
+                    @if (!IsCorePartiesInstalled)
+                    {
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   Size="Size.Small"
+                                   OnClick="@InstallCorePartiesAsync"
+                                   data-action="install-core-parties">
+                            @I18n.T("ui.action.installCoreParties")
+                        </MudButton>
+                    }
+                    else if (!IsDemoContactsInstalled)
+                    {
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Secondary"
+                                   Size="Size.Small"
+                                   OnClick="@InstallDemoContactsAsync"
+                                   data-action="install-demo-contacts">
+                            Installer Kontakter (demo.contacts)
+                        </MudButton>
+                    }
+                </div>
             </div>
 
             @if (_installedApps.Count == 0)
@@ -83,6 +95,9 @@
     private bool IsCorePartiesInstalled =>
         _installedApps.Any(a => string.Equals(a.AppId, "core.parties", StringComparison.OrdinalIgnoreCase));
 
+    private bool IsDemoContactsInstalled =>
+        _installedApps.Any(a => string.Equals(a.AppId, "demo.contacts", StringComparison.OrdinalIgnoreCase));
+
     protected override async Task OnInitializedAsync()
     {
         Api.OnStateChanged += StateHasChanged;
@@ -101,6 +116,11 @@
     private async Task InstallCorePartiesAsync()
     {
         await Api.InstallBuiltInAppAsync("core.parties");
+    }
+
+    private async Task InstallDemoContactsAsync()
+    {
+        await Api.InstallBuiltInAppAsync("demo.contacts");
     }
 
     private async Task UninstallAppAsync(string appId)

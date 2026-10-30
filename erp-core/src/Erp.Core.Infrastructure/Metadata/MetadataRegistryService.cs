@@ -63,6 +63,22 @@ public sealed class MetadataRegistryService(
         {
             ValidateObjectDefinition(objectDef);
 
+            foreach (var f in objectDef.Fields)
+            {
+                if (!string.IsNullOrWhiteSpace(f.OwnerApp)
+                    && !string.Equals(f.OwnerApp, objectDef.OwnerApp, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new MetadataValidationException(
+                        $"Object owner '{objectDef.OwnerApp}' cannot define or modify field '{f.Name}' owned by '{f.OwnerApp}' on '{objectDef.Id}'.");
+                }
+
+                if (f.Name.Contains('.', StringComparison.Ordinal))
+                {
+                    throw new MetadataValidationException(
+                        $"Object owner '{objectDef.OwnerApp}' cannot define dotted extension field name '{f.Name}' on '{objectDef.Id}'.");
+                }
+            }
+
             var existing = await GetObjectAsync(objectDef.Id, cancellationToken);
             if (existing is not null)
             {
@@ -72,18 +88,24 @@ public sealed class MetadataRegistryService(
                         $"Object '{objectDef.Id}' is owned by '{existing.OwnerApp}' and cannot be redefined by '{objectDef.OwnerApp}'.");
                 }
 
-                // Preserve any extension fields owned by other apps
+                // Preserve any extension fields owned by other apps and orphaned columns
                 var extensionFields = existing.Fields
                     .Where(f => !string.Equals(f.OwnerApp, objectDef.OwnerApp, StringComparison.OrdinalIgnoreCase))
                     .ToList();
 
                 foreach (var extField in extensionFields)
                 {
-                    if (objectDef.Fields.All(f => !string.Equals(f.GetColumnName(objectDef.OwnerApp), extField.GetColumnName(objectDef.OwnerApp), StringComparison.OrdinalIgnoreCase)))
+                    var extCol = extField.GetColumnName(objectDef.OwnerApp);
+                    if (objectDef.Fields.Any(f => string.Equals(f.GetColumnName(objectDef.OwnerApp), extCol, StringComparison.OrdinalIgnoreCase)))
                     {
-                        objectDef.Fields.Add(extField);
+                        throw new MetadataValidationException(
+                            $"Object owner '{objectDef.OwnerApp}' cannot overwrite extension field '{extField.Name}' owned by '{extField.OwnerApp}'.");
                     }
+
+                    objectDef.Fields.Add(extField);
                 }
+
+                objectDef.OrphanedColumns = existing.OrphanedColumns;
             }
 
             await UpsertMetadataItemAsync("object", objectDef.Id, objectDef.OwnerApp, objectDef.Version, objectDef, cancellationToken);
@@ -104,7 +126,20 @@ public sealed class MetadataRegistryService(
 
             foreach (var extField in ext.Fields)
             {
-                extField.OwnerApp = string.IsNullOrWhiteSpace(extField.OwnerApp) ? ext.ExtendingApp : extField.OwnerApp;
+                if (!string.IsNullOrWhiteSpace(extField.OwnerApp)
+                    && !string.Equals(extField.OwnerApp, ext.ExtendingApp, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new MetadataValidationException(
+                        $"Extending app '{ext.ExtendingApp}' cannot modify field '{extField.Name}' owned by '{extField.OwnerApp}' on '{targetObj.Id}'.");
+                }
+
+                if (extField.Name.Contains('.', StringComparison.Ordinal))
+                {
+                    throw new MetadataValidationException(
+                        $"Extension field '{extField.Name}' on '{targetObj.Id}' cannot use a dotted prefix; it is implicitly prefixed with '{ext.ExtendingApp}'.");
+                }
+
+                extField.OwnerApp = ext.ExtendingApp;
 
                 var existingOwnerField = targetObj.Fields.FirstOrDefault(f =>
                     string.Equals(f.Name, extField.Name, StringComparison.OrdinalIgnoreCase)
@@ -118,6 +153,10 @@ public sealed class MetadataRegistryService(
                 targetObj.Fields.RemoveAll(f =>
                     string.Equals(f.Name, extField.Name, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(f.OwnerApp, extField.OwnerApp, StringComparison.OrdinalIgnoreCase));
+
+                var colName = extField.GetColumnName(targetObj.OwnerApp);
+                targetObj.OrphanedColumns.RemoveAll(o =>
+                    string.Equals(o.ColumnName, colName, StringComparison.OrdinalIgnoreCase));
 
                 targetObj.Fields.Add(extField);
             }

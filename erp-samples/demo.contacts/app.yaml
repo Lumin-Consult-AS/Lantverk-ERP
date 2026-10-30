@@ -1,0 +1,55 @@
+id: demo.contacts
+version: 1.0.0
+name: Kontakter
+publisher: Jens Nymoen
+license: Apache-2.0
+sdk: ">=1.0.0 <2.0.0"
+
+dependencies:
+  core.parties: ">=1.0.0 <2.0.0"
+
+enums:
+  demo.channel: [email, phone, sms]
+
+objects:
+  demo.contactnote:
+    label: Kontaktnotat
+    fields:
+      party:
+        type: reference
+        to: core.party
+        required: true
+        onDelete: cascade
+        label: contacts.fields.party
+      text:
+        type: text
+        required: true
+        label: contacts.fields.text
+      followUp:
+        type: date
+        label: contacts.fields.followUp
+
+extensions:
+  core.party:
+    fields:
+      preferredChannel:
+        type: enum
+        of: demo.channel
+        label: contacts.fields.preferredChannel
+
+events:
+  publishes:
+    - demo.contactnote.created@1
+
+pages:
+  - pages/contactnote-list.yaml
+  - pages/contactnote-card.yaml
+  - extend: core.party-card
+    file: pages/party-card-ext.yaml
+
+permissionSets:
+  - id: demo.contacts.user
+    label: Kontaktbruker
+    grants:
+      demo.contactnote: [read, create, update, delete]
+

@@ -1,0 +1,14 @@
+contacts:
+  list:
+    title: Contact Notes
+  card:
+    general: General
+    note: Note
+  tabs:
+    contactNotes: Contact Notes
+  fields:
+    party: Party
+    text: Note text
+    followUp: Follow-up date
+    preferredChannel: Preferred channel
+

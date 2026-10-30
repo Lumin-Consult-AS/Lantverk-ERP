@@ -1,0 +1,14 @@
+contacts:
+  list:
+    title: Kontaktnotater
+  card:
+    general: Generelt
+    note: Notat
+  tabs:
+    contactNotes: Kontaktnotater
+  fields:
+    party: Part
+    text: Notattekst
+    followUp: Oppfølgingsdato
+    preferredChannel: Foretrukket kanal
+
