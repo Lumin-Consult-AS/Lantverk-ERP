@@ -1,0 +1,12 @@
+approvals:
+  list:
+    title: Utlegg
+  card:
+    general: Generelt
+  actions:
+    submit: Send til godkjenning
+  fields:
+    title: Tittel
+    amount: Beløp
+    comment: Kommentar
+    status: Status

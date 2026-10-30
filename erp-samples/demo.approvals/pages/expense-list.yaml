@@ -1,0 +1,8 @@
+id: demo.expense-list
+type: list
+object: demo.expense
+title: approvals.list.title
+columns:
+  - title
+  - amount
+  - status

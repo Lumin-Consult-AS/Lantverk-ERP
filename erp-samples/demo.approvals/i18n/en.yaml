@@ -1,0 +1,12 @@
+approvals:
+  list:
+    title: Expenses
+  card:
+    general: General
+  actions:
+    submit: Submit for approval
+  fields:
+    title: Title
+    amount: Amount
+    comment: Comment
+    status: Status

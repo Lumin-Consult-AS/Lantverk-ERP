@@ -6,6 +6,7 @@ using Erp.Core.Domain.Metadata;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Metadata;
 using Erp.Core.Infrastructure.Persistence;
+using Erp.Core.Infrastructure.Workflow;
 using Microsoft.EntityFrameworkCore;
 
 namespace Erp.Core.Infrastructure.Apps;
@@ -19,7 +20,8 @@ public sealed class AppInstallationService(
     MetadataRegistryService metadataRegistry,
     IAppPackageStorage packageStorage,
     ITenantContext tenantContext,
-    KubernetesAppOrchestrator? appOrchestrator = null)
+    KubernetesAppOrchestrator? appOrchestrator = null,
+    WorkflowStore? workflowStore = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -132,6 +134,12 @@ public sealed class AppInstallationService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        // 6b. Copy the app's default workflows into the tenant's own workflow definitions
+        if (workflowStore is not null)
+        {
+            await workflowStore.SeedFromManifestAsync(manifest, cancellationToken);
+        }
+
         // 7. Capture immutable metadata snapshot for the tenant
         await CaptureMetadataSnapshotAsync(
             triggerAction: isUpgrade ? "upgrade" : "install",
@@ -217,6 +225,11 @@ public sealed class AppInstallationService(
         var uninstalledVersion = installedApp.Version;
         dbContext.InstalledApps.Remove(installedApp);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (workflowStore is not null)
+        {
+            await workflowStore.RemoveAppDefaultsAsync(appId, cancellationToken);
+        }
 
         // Capture immutable metadata snapshot after uninstallation
         return await CaptureMetadataSnapshotAsync(

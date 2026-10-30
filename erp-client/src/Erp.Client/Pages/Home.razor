@@ -8,7 +8,45 @@
     <MudItem xs="12" md="7">
         <MudPaper Elevation="2" Class="pa-4 mb-4">
             <MudText Typo="Typo.h5" Class="mb-3">@I18n.T("ui.nav.home")</MudText>
-            <MudAlert Severity="Severity.Info">@I18n.T("ui.status.worklistEmpty")</MudAlert>
+            @if (_attention.Count(i => !i.Hidden) == 0)
+            {
+                <MudAlert Severity="Severity.Info">@I18n.T("ui.status.worklistEmpty")</MudAlert>
+            }
+
+            @foreach (var item in _attention.Where(i => _showHidden || !i.Hidden))
+            {
+                <MudAlert Severity="@SeverityOf(item)" Class="mb-2" Variant="@(item.Hidden ? Variant.Outlined : Variant.Filled)"
+                          data-attention-id="@item.Id">
+                    <div class="d-flex flex-wrap align-center gap-2">
+                        <b>@item.Label</b>
+                        <MudChip T="string" Size="Size.Small">@item.Count</MudChip>
+                        <MudSpacer />
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Inherit" OnClick="@(() => OpenAttention(item))">
+                            @I18n.T("ui.attention.open")
+                        </MudButton>
+                        @if (item.Hidden)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Inherit" OnClick="@(() => RestoreAttentionAsync(item))">
+                                @I18n.T("ui.attention.showHidden")
+                            </MudButton>
+                        }
+                        else
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Inherit" OnClick="@(() => SnoozeAttentionAsync(item))">
+                                @I18n.T("ui.attention.snooze")
+                            </MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Inherit" OnClick="@(() => HideAttentionAsync(item))">
+                                @I18n.T("ui.attention.hide")
+                            </MudButton>
+                        }
+                    </div>
+                </MudAlert>
+            }
+
+            @if (_attention.Any(i => i.Hidden))
+            {
+                <MudSwitch T="bool" @bind-Value="_showHidden" Label="@I18n.T("ui.attention.showHidden")" Color="Color.Primary" />
+            }
         </MudPaper>
     </MudItem>
 
@@ -98,9 +136,12 @@
     private bool IsDemoContactsInstalled =>
         _installedApps.Any(a => string.Equals(a.AppId, "demo.contacts", StringComparison.OrdinalIgnoreCase));
 
+    private IReadOnlyList<ClientAttentionItem> _attention = [];
+    private bool _showHidden;
+
     protected override async Task OnInitializedAsync()
     {
-        Api.OnStateChanged += StateHasChanged;
+        Api.OnStateChanged += OnApiStateChanged;
         I18n.OnLocaleChanged += StateHasChanged;
 
         if (Api.CurrentAuth is null)
@@ -111,6 +152,63 @@
         {
             await Api.RefreshSessionAndMetadataAsync();
         }
+
+        await LoadAttentionAsync();
+    }
+
+    private async void OnApiStateChanged()
+    {
+        await LoadAttentionAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadAttentionAsync()
+    {
+        try
+        {
+            _attention = await Api.GetAttentionAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _attention = [];
+        }
+    }
+
+    private static Severity SeverityOf(ClientAttentionItem item) => item.Severity.ToLowerInvariant() switch
+    {
+        "action" => Severity.Error,
+        "warning" => Severity.Warning,
+        _ => Severity.Info
+    };
+
+    private void OpenAttention(ClientAttentionItem item)
+    {
+        if (item.Page is "core.tasks")
+        {
+            Nav.NavigateTo("/tasks");
+        }
+        else if (!string.IsNullOrWhiteSpace(item.Page))
+        {
+            Nav.NavigateTo($"/page/{item.Page}");
+        }
+    }
+
+    private async Task HideAttentionAsync(ClientAttentionItem item)
+    {
+        await Api.HideAttentionAsync(item.Id);
+        await LoadAttentionAsync();
+    }
+
+    private async Task SnoozeAttentionAsync(ClientAttentionItem item)
+    {
+        await Api.SnoozeAttentionAsync(item.Id, 24);
+        await LoadAttentionAsync();
+    }
+
+    private async Task RestoreAttentionAsync(ClientAttentionItem item)
+    {
+        await Api.RestoreAttentionAsync(item.Id);
+        await LoadAttentionAsync();
     }
 
     private async Task InstallCorePartiesAsync()
@@ -130,7 +228,7 @@
 
     public void Dispose()
     {
-        Api.OnStateChanged -= StateHasChanged;
+        Api.OnStateChanged -= OnApiStateChanged;
         I18n.OnLocaleChanged -= StateHasChanged;
     }
 }

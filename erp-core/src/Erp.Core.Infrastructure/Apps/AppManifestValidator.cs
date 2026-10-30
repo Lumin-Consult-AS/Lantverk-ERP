@@ -145,6 +145,37 @@ public static class AppManifestValidator
             }
         }
 
+        // 3b. Validate workflows: owned by this app, valid definition, and every transition's workflow is defined
+        var manifestWorkflowIds = manifest.Workflows.Select(w => w.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var workflow in manifest.Workflows)
+        {
+            if (!manifest.HasValidAppPrefix(workflow.Id))
+            {
+                errors.Add($"Workflow '{workflow.Id}' does not match owning app '{manifest.Id}' prefix.");
+            }
+
+            if (!existingObjects.TryGetValue(workflow.Object, out var workflowObject)
+                && !manifestObjectsById.TryGetValue(workflow.Object, out workflowObject))
+            {
+                errors.Add($"Workflow '{workflow.Id}' refers to unknown object '{workflow.Object}'.");
+                continue;
+            }
+
+            errors.AddRange(Erp.Core.Domain.Workflow.WorkflowDefinitionValidator.Validate(workflow, workflowObject));
+        }
+
+        foreach (var obj in manifest.Metadata.Objects)
+        {
+            foreach (var (transitionName, transition) in obj.Status?.Transitions ?? [])
+            {
+                if (!string.IsNullOrWhiteSpace(transition.Workflow) && !manifestWorkflowIds.Contains(transition.Workflow))
+                {
+                    errors.Add(
+                        $"Transition '{transitionName}' on '{obj.Id}' refers to workflow '{transition.Workflow}', which this app does not define.");
+                }
+            }
+        }
+
         // 4. Validate subscribed events (must exist in tenant or built-in core events)
         var selfPublishedEvents = manifest.Metadata.Events
             .Select(e => e.Id)

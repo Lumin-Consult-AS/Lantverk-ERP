@@ -55,7 +55,7 @@ internal static class GrpcCallContextHelper
 
         var prevCorrelation = txRegistry.CurrentCorrelationId;
         txRegistry.CurrentCorrelationId = correlationId;
-        var tenantScope = tenantContext.BeginScope(validated.TenantId, validated.UserId, companyId);
+        var tenantScope = tenantContext.BeginScope(validated.TenantId, validated.UserId, companyId, validated.Roles);
 
         return new CombinedCallScope(tenantScope, txRegistry, prevCorrelation);
     }

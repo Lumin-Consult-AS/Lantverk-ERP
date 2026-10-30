@@ -31,7 +31,8 @@ public static class AppManifestParser
         "pages",
         "permissionSets",
         "migrations",
-        "attention"
+        "attention",
+        "workflows"
     };
 
     private static readonly HashSet<string> AllowedPermissions = new(StringComparer.OrdinalIgnoreCase)
@@ -273,6 +274,18 @@ public static class AppManifestParser
                         Audience = TryGetMap(attMap, "audience", out var aud) ? ConvertYamlDictionary(aud) : null,
                         Action = TryGetMap(attMap, "action", out var act) ? ConvertYamlDictionary(act) : null
                     });
+                }
+            }
+        }
+
+        // Parse workflow defaults (approval flows attached to status transitions)
+        if (root.TryGetValue("workflows", out var wfObj) && wfObj is IEnumerable<object> wfList)
+        {
+            foreach (var wf in wfList)
+            {
+                if (wf is IDictionary<object, object> wfMap)
+                {
+                    manifest.Workflows.Add(Erp.Core.Infrastructure.Workflow.WorkflowYamlParser.Parse(wfMap));
                 }
             }
         }

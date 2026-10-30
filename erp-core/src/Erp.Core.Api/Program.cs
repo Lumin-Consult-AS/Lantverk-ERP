@@ -8,7 +8,12 @@ using Erp.Core.Api.Grpc;
 using Erp.Core.Api.Middleware;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Apps;
+using Erp.Core.Infrastructure.Attention;
 using Erp.Core.Infrastructure.Events;
+using Erp.Core.Infrastructure.Notifications;
+using Erp.Core.Infrastructure.Security;
+using Erp.Core.Infrastructure.Workflow;
+using Microsoft.Extensions.Options;
 using Erp.Core.Infrastructure.Data;
 using Erp.Core.Infrastructure.Metadata;
 using Erp.Core.Infrastructure.Persistence;
@@ -37,13 +42,28 @@ builder.Services.AddSingleton<EventBusOptions>();
 builder.Services.AddSingleton<EventDeliveryWakeSignal>();
 builder.Services.AddScoped<EventPublisher>();
 builder.Services.AddScoped<EventLogService>();
+builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<EmailOptions>>().Value);
+builder.Services.AddSingleton<IEmailSender>(sp =>
+    sp.GetRequiredService<EmailOptions>().SmtpHost is { Length: > 0 }
+        ? new SmtpEmailSender(sp.GetRequiredService<EmailOptions>())
+        : ActivatorUtilities.CreateInstance<LoggingEmailSender>(sp));
+builder.Services.AddSingleton<TaskLinkTokens>();
+builder.Services.AddSingleton<AttentionCache>();
+builder.Services.AddScoped<PermissionService>();
+builder.Services.AddScoped<WorkflowStore>();
+builder.Services.AddScoped<WorkflowNotifier>();
+builder.Services.AddScoped<WorkflowEngine>();
+builder.Services.AddScoped<TaskLinkResponder>();
+builder.Services.AddScoped<AttentionService>();
+builder.Services.AddHostedService<TaskDeadlineWorker>();
 builder.Services.AddHttpClient(EventDeliveryWorker.WebhookHttpClientName);
 builder.Services.AddHostedService<EventDeliveryWorker>();
 builder.Services.AddScoped<MetadataRegistryService>();
 builder.Services.AddScoped<RecordDataService>();
 builder.Services.AddSingleton<IAppPackageStorage>(_ => new LocalAppPackageStorage());
 builder.Services.AddScoped<AppInstallationService>();
-builder.Services.AddGrpc();
+builder.Services.AddGrpc(options => options.Interceptors.Add<PermissionExceptionInterceptor>());
 
 builder.Services.AddDbContext<CoreDbContext>((sp, options) =>
 {
@@ -302,6 +322,9 @@ v1.MapGet("/core/users", async (CoreDbContext db, CancellationToken ct) =>
 v1.MapMetadataAndDataEndpoints();
 v1.MapAppManagementEndpoints();
 v1.MapEventEndpoints();
+v1.MapWorkflowEndpoints();
+v1.MapRoleEndpoints();
+app.MapGroup("/api/v1").MapTaskResponseEndpoints();
 
 app.MapGrpcService<CoreDataGrpcService>();
 app.MapGrpcService<CoreEventGrpcService>();
