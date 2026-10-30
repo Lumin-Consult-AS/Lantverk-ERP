@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Erp.Core.Api;
 using Erp.Core.Api.Auth;
 using Erp.Core.Api.Endpoints;
+using Erp.Core.Api.Grpc;
 using Erp.Core.Api.Middleware;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Apps;
@@ -26,10 +27,16 @@ builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOpt
 builder.Services.AddScoped<ITenantContext, TenantContext>();
 builder.Services.AddScoped<TenantSessionInterceptor>();
 builder.Services.AddScoped<InternalTokenService>();
+builder.Services.AddScoped<IInternalTokenIssuer>(sp => sp.GetRequiredService<InternalTokenService>());
+builder.Services.AddSingleton<KubernetesAppOrchestrator>();
+builder.Services.AddSingleton<ActiveCallTransactionRegistry>();
+builder.Services.AddSingleton<AppHostOptions>();
+builder.Services.AddScoped<AppHostService>();
 builder.Services.AddScoped<MetadataRegistryService>();
 builder.Services.AddScoped<RecordDataService>();
 builder.Services.AddSingleton<IAppPackageStorage>(_ => new LocalAppPackageStorage());
 builder.Services.AddScoped<AppInstallationService>();
+builder.Services.AddGrpc();
 
 builder.Services.AddDbContext<CoreDbContext>((sp, options) =>
 {
@@ -287,6 +294,11 @@ v1.MapGet("/core/users", async (CoreDbContext db, CancellationToken ct) =>
 
 v1.MapMetadataAndDataEndpoints();
 v1.MapAppManagementEndpoints();
+
+app.MapGrpcService<CoreDataGrpcService>();
+app.MapGrpcService<CoreEventGrpcService>();
+app.MapGrpcService<CoreWorkflowGrpcService>();
+app.MapGrpcService<CoreDocumentGrpcService>();
 
 app.MapGet("/", () => Results.Content(LandingPageHtml.Content, "text/html; charset=utf-8"))
     .AllowAnonymous();

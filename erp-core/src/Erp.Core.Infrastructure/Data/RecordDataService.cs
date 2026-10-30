@@ -7,8 +7,10 @@ using System.Text.RegularExpressions;
 using Erp.Core.Domain.Data;
 using Erp.Core.Domain.Metadata;
 using Erp.Core.Domain.Tenancy;
+using Erp.Core.Infrastructure.Apps;
 using Erp.Core.Infrastructure.Metadata;
 using Erp.Core.Infrastructure.Persistence;
+using Erp.Sdk.Contracts.V1;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
@@ -24,7 +26,9 @@ namespace Erp.Core.Infrastructure.Data;
 public sealed class RecordDataService(
     CoreDbContext dbContext,
     MetadataRegistryService metadataRegistry,
-    ITenantContext tenantContext)
+    ITenantContext tenantContext,
+    AppHostService? appHostService = null,
+    ActiveCallTransactionRegistry? activeTxRegistry = null)
 {
     public async Task<RecordData?> GetAsync(
         string objectId,
@@ -143,11 +147,37 @@ public sealed class RecordDataService(
         var effectiveCompanyId = objectDef.IsCompanyScoped ? (companyId ?? tenantContext.CompanyId) : null;
         var recordId = explicitId is { } eid && eid != Guid.Empty ? eid : Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
+        var correlationId = activeTxRegistry?.CurrentCorrelationId ?? Guid.NewGuid().ToString("D");
 
         ValidateUnknownFields(fields, objectDef);
 
-        return await ExecuteWithConnectionAsync(async (conn, tx) =>
+        var createdRecord = await ExecuteWithConnectionAsync(async (conn, tx) =>
         {
+            if (appHostService is not null)
+            {
+                await appHostService.InvokeSynchronousHooksAsync(
+                    HookTypeProto.OnValidate,
+                    objectDef.Id,
+                    "create",
+                    recordId,
+                    1L,
+                    fields,
+                    effectiveCompanyId,
+                    correlationId,
+                    cancellationToken);
+
+                await appHostService.InvokeSynchronousHooksAsync(
+                    HookTypeProto.OnBeforeSave,
+                    objectDef.Id,
+                    "create",
+                    recordId,
+                    1L,
+                    fields,
+                    effectiveCompanyId,
+                    correlationId,
+                    cancellationToken);
+            }
+
             await using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
 
@@ -240,10 +270,41 @@ public sealed class RecordDataService(
                 RETURNING *;
                 """;
 
-            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-            await reader.ReadAsync(cancellationToken);
-            return ReadRecord(reader, objectDef);
-        }, cancellationToken);
+            RecordData saved;
+            await using (var reader = await cmd.ExecuteReaderAsync(cancellationToken))
+            {
+                await reader.ReadAsync(cancellationToken);
+                saved = ReadRecord(reader, objectDef);
+            }
+
+            if (appHostService is not null)
+            {
+                await appHostService.InvokeSynchronousHooksAsync(
+                    HookTypeProto.OnAfterSave,
+                    objectDef.Id,
+                    "create",
+                    saved.Id,
+                    saved.RowVersion,
+                    saved.Fields,
+                    effectiveCompanyId,
+                    correlationId,
+                    cancellationToken);
+            }
+
+            return saved;
+        }, cancellationToken, correlationId);
+
+        if (appHostService is not null)
+        {
+            await appHostService.DeliverEventToSubscribersAsync(
+                $"{objectDef.Id}.created@1",
+                BuildRecordEventPayload(objectDef.Id, createdRecord.Id, createdRecord.Fields),
+                effectiveCompanyId,
+                correlationId,
+                cancellationToken: cancellationToken);
+        }
+
+        return createdRecord;
     }
 
     public async Task<RecordData> UpdateAsync(
@@ -258,15 +319,41 @@ public sealed class RecordDataService(
         var (schema, table) = objectDef.GetSchemaAndTable();
         var userId = tenantContext.UserId ?? tenantContext.TenantId ?? Guid.Empty;
         var now = DateTimeOffset.UtcNow;
+        var correlationId = activeTxRegistry?.CurrentCorrelationId ?? Guid.NewGuid().ToString("D");
 
         ValidateUnknownFields(fields, objectDef);
 
-        return await ExecuteWithConnectionAsync(async (conn, tx) =>
+        var updatedRecord = await ExecuteWithConnectionAsync(async (conn, tx) =>
         {
             if (objectDef.Status is not null
                 || objectDef.Fields.Any(f => f.RequiredWhen is not null || f.ReadOnlyWhen is not null))
             {
                 await ValidateConditionalRulesOnUpdateAsync(conn, tx, objectDef, id, fields, cancellationToken);
+            }
+
+            if (appHostService is not null)
+            {
+                await appHostService.InvokeSynchronousHooksAsync(
+                    HookTypeProto.OnValidate,
+                    objectDef.Id,
+                    "update",
+                    id,
+                    expectedRowVersion,
+                    fields,
+                    companyId,
+                    correlationId,
+                    cancellationToken);
+
+                await appHostService.InvokeSynchronousHooksAsync(
+                    HookTypeProto.OnBeforeSave,
+                    objectDef.Id,
+                    "update",
+                    id,
+                    expectedRowVersion,
+                    fields,
+                    companyId,
+                    correlationId,
+                    cancellationToken);
             }
 
             await using var cmd = conn.CreateCommand();
@@ -327,18 +414,50 @@ public sealed class RecordDataService(
                 RETURNING *;
                 """;
 
+            RecordData? saved = null;
             await using (var reader = await cmd.ExecuteReaderAsync(cancellationToken))
             {
                 if (await reader.ReadAsync(cancellationToken))
                 {
-                    return ReadRecord(reader, objectDef);
+                    saved = ReadRecord(reader, objectDef);
                 }
+            }
+
+            if (saved is not null)
+            {
+                if (appHostService is not null)
+                {
+                    await appHostService.InvokeSynchronousHooksAsync(
+                        HookTypeProto.OnAfterSave,
+                        objectDef.Id,
+                        "update",
+                        saved.Id,
+                        saved.RowVersion,
+                        saved.Fields,
+                        companyId,
+                        correlationId,
+                        cancellationToken);
+                }
+
+                return saved;
             }
 
             // Distinguish between 404 Not Found and 412 Concurrency Conflict
             await ThrowNotFoundOrConcurrencyConflictAsync(conn, tx, schema, table, objectDef.Id, id, expectedRowVersion, cancellationToken);
             throw new RecordNotFoundException(objectDef.Id, id);
-        }, cancellationToken);
+        }, cancellationToken, correlationId);
+
+        if (appHostService is not null)
+        {
+            await appHostService.DeliverEventToSubscribersAsync(
+                $"{objectDef.Id}.updated@1",
+                BuildRecordEventPayload(objectDef.Id, updatedRecord.Id, updatedRecord.Fields),
+                companyId,
+                correlationId,
+                cancellationToken: cancellationToken);
+        }
+
+        return updatedRecord;
     }
 
     public async Task<RecordData> TransitionStatusAsync(
@@ -426,9 +545,36 @@ public sealed class RecordDataService(
     {
         var objectDef = await RequireObjectAsync(objectId, cancellationToken);
         var (schema, table) = objectDef.GetSchemaAndTable();
+        var correlationId = activeTxRegistry?.CurrentCorrelationId ?? Guid.NewGuid().ToString("D");
 
         await ExecuteWithConnectionAsync<object?>(async (conn, tx) =>
         {
+            if (appHostService is not null)
+            {
+                var emptyFields = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                await appHostService.InvokeSynchronousHooksAsync(
+                    HookTypeProto.OnValidate,
+                    objectDef.Id,
+                    "delete",
+                    id,
+                    expectedRowVersion,
+                    emptyFields,
+                    companyId,
+                    correlationId,
+                    cancellationToken);
+
+                await appHostService.InvokeSynchronousHooksAsync(
+                    HookTypeProto.OnBeforeSave,
+                    objectDef.Id,
+                    "delete",
+                    id,
+                    expectedRowVersion,
+                    emptyFields,
+                    companyId,
+                    correlationId,
+                    cancellationToken);
+            }
+
             await using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
 
@@ -457,8 +603,58 @@ public sealed class RecordDataService(
                 await ThrowNotFoundOrConcurrencyConflictAsync(conn, tx, schema, table, objectDef.Id, id, expectedRowVersion, cancellationToken);
             }
 
+            if (appHostService is not null)
+            {
+                await appHostService.InvokeSynchronousHooksAsync(
+                    HookTypeProto.OnAfterSave,
+                    objectDef.Id,
+                    "delete",
+                    id,
+                    expectedRowVersion,
+                    new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase),
+                    companyId,
+                    correlationId,
+                    cancellationToken);
+            }
+
             return null;
-        }, cancellationToken);
+        }, cancellationToken, correlationId);
+
+        if (appHostService is not null)
+        {
+            await appHostService.DeliverEventToSubscribersAsync(
+                $"{objectDef.Id}.deleted@1",
+                BuildRecordEventPayload(objectDef.Id, id, null),
+                companyId,
+                correlationId,
+                cancellationToken: cancellationToken);
+        }
+    }
+
+    public async Task<int> DeleteWhereAsync(
+        string objectId,
+        string? filterExpression,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var filterNode = string.IsNullOrWhiteSpace(filterExpression)
+            ? null
+            : FilterExpressionParser.Parse(filterExpression);
+
+        var matching = await QueryAsync(
+            objectId,
+            new DataQuery { Filter = filterNode, Top = 1000 },
+            companyId,
+            cancellationToken);
+
+        var deleted = 0;
+        foreach (var rec in matching)
+        {
+            await DeleteAsync(objectId, rec.Id, rec.RowVersion, companyId, cancellationToken);
+            deleted++;
+        }
+
+        return deleted;
     }
 
     public async Task<IReadOnlyList<BatchResultItem>> BatchAsync(
@@ -1143,8 +1339,23 @@ public sealed class RecordDataService(
 
     private async Task<T> ExecuteWithConnectionAsync<T>(
         Func<DbConnection, DbTransaction?, Task<T>> action,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? correlationId = null)
     {
+        var enlisted = activeTxRegistry?.TryGet(correlationId, tenantContext.TenantId);
+        if (enlisted is not null)
+        {
+            await enlisted.Gate.WaitAsync(cancellationToken);
+            try
+            {
+                return await action(enlisted.Connection, enlisted.Transaction);
+            }
+            finally
+            {
+                enlisted.Gate.Release();
+            }
+        }
+
         var connection = dbContext.Database.GetDbConnection();
         var shouldClose = connection.State != ConnectionState.Open;
         if (shouldClose)
@@ -1152,9 +1363,16 @@ public sealed class RecordDataService(
             await connection.OpenAsync(cancellationToken);
         }
 
+        DbTransaction? localTx = null;
         try
         {
             var currentTx = dbContext.Database.CurrentTransaction?.GetDbTransaction();
+            if (currentTx is null && !string.IsNullOrWhiteSpace(correlationId))
+            {
+                localTx = await connection.BeginTransactionAsync(cancellationToken);
+                currentTx = localTx;
+            }
+
             await using (var setCmd = connection.CreateCommand())
             {
                 setCmd.Transaction = currentTx;
@@ -1164,15 +1382,77 @@ public sealed class RecordDataService(
                 await setCmd.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            return await action(connection, currentTx);
+            IDisposable? registration = null;
+            if (!string.IsNullOrWhiteSpace(correlationId)
+                && currentTx is not null
+                && tenantContext.TenantId.HasValue
+                && activeTxRegistry is not null)
+            {
+                registration = activeTxRegistry.Register(
+                    correlationId,
+                    tenantContext.TenantId.Value,
+                    connection,
+                    currentTx);
+            }
+
+            try
+            {
+                var result = await action(connection, currentTx);
+                if (localTx is not null)
+                {
+                    await localTx.CommitAsync(cancellationToken);
+                }
+                return result;
+            }
+            catch
+            {
+                if (localTx is not null)
+                {
+                    await localTx.RollbackAsync(cancellationToken);
+                }
+                throw;
+            }
+            finally
+            {
+                registration?.Dispose();
+            }
         }
         finally
         {
+            if (localTx is not null)
+            {
+                await localTx.DisposeAsync();
+            }
+
             if (shouldClose)
             {
                 await connection.CloseAsync();
             }
         }
+    }
+
+    private static Dictionary<string, object?> BuildRecordEventPayload(
+        string objectId,
+        Guid recordId,
+        IDictionary<string, object?>? fields)
+    {
+        var shortName = objectId.Contains('.')
+            ? objectId[(objectId.LastIndexOf('.') + 1)..]
+            : objectId;
+
+        var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = recordId,
+            ["recordId"] = recordId,
+            [$"{shortName}Id"] = recordId
+        };
+
+        if (fields is not null)
+        {
+            payload["fields"] = fields;
+        }
+
+        return payload;
     }
 
     private static Dictionary<string, object?> BuildEffectiveFieldsForCreate(

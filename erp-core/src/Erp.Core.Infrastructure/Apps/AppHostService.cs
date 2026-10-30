@@ -1,0 +1,320 @@
+using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Erp.Core.Domain.Apps;
+using Erp.Core.Domain.Data;
+using Erp.Core.Domain.Tenancy;
+using Erp.Core.Infrastructure.Persistence;
+using Erp.Sdk.Contracts.V1;
+using Grpc.Core;
+using Grpc.Net.Client;
+using Microsoft.EntityFrameworkCore;
+
+namespace Erp.Core.Infrastructure.Apps;
+
+public sealed class AppHostOptions
+{
+    /// <summary>
+    /// Strict synchronous hook timeout (default 5 seconds per Steg 6 specification).
+    /// </summary>
+    public TimeSpan SynchronousHookTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Optional Core callback endpoint URL sent via <c>x-erp-core-endpoint</c> header.
+    /// </summary>
+    public string? CoreCallbackEndpoint { get; set; }
+}
+
+/// <summary>
+/// Invokes isolated App containers over gRPC for synchronous hooks (<c>OnValidate</c>,
+/// <c>OnBeforeSave</c>, <c>OnAfterSave</c>) with a 5-second deadline, asynchronous domain events
+/// (<c>OnEvent</c>), and cross-app contract interfaces (<c>Implements&lt;T&gt;</c>).
+/// </summary>
+public sealed class AppHostService(
+    CoreDbContext dbContext,
+    ITenantContext tenantContext,
+    KubernetesAppOrchestrator orchestrator,
+    IInternalTokenIssuer? tokenIssuer = null,
+    AppHostOptions? options = null)
+{
+    private readonly AppHostOptions _options = options ?? new AppHostOptions();
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+    };
+
+    public async Task InvokeSynchronousHooksAsync(
+        HookTypeProto hookType,
+        string objectId,
+        string operation,
+        Guid recordId,
+        long rowVersion,
+        IDictionary<string, object?> fields,
+        Guid? companyId,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = tenantContext.TenantId;
+        if (!tenantId.HasValue)
+        {
+            return;
+        }
+
+        var installedApps = await dbContext.InstalledApps
+            .AsNoTracking()
+            .OrderBy(a => a.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        foreach (var app in installedApps)
+        {
+            var endpoint = orchestrator.ResolveEndpoint(app.AppId, app.Version);
+            if (endpoint is null)
+            {
+                continue;
+            }
+
+            var callContext = CreateCallContextProto(tenantId.Value, companyId, correlationId);
+            using var channel = CreateChannel(endpoint);
+            var client = new AppService.AppServiceClient(channel);
+
+            var headers = new Grpc.Core.Metadata();
+            if (!string.IsNullOrWhiteSpace(_options.CoreCallbackEndpoint))
+            {
+                headers.Add("x-erp-core-endpoint", _options.CoreCallbackEndpoint);
+            }
+
+            var request = new HookRequest
+            {
+                Context = callContext,
+                HookType = hookType,
+                ObjectId = objectId,
+                Operation = operation,
+                RecordId = recordId.ToString("D"),
+                RowVersion = rowVersion,
+                FieldsJson = JsonSerializer.Serialize(fields, JsonOptions)
+            };
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(_options.SynchronousHookTimeout);
+
+            HookResponse response;
+            try
+            {
+                response = await client.InvokeHookAsync(
+                    request,
+                    headers: headers,
+                    deadline: DateTime.UtcNow.Add(_options.SynchronousHookTimeout),
+                    cancellationToken: timeoutCts.Token);
+            }
+            catch (RpcException ex) when (
+                ex.StatusCode is StatusCode.DeadlineExceeded or StatusCode.Cancelled
+                // The app's handler may surface our cancellation as Unknown ("Exception was thrown by handler").
+                || (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested))
+            {
+                throw new RecordValidationException(
+                    $"Synchronous hook '{hookType}' in app '{app.AppId}' exceeded the {_options.SynchronousHookTimeout.TotalSeconds:0.#}s deadline.");
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new RecordValidationException(
+                    $"Synchronous hook '{hookType}' in app '{app.AppId}' exceeded the {_options.SynchronousHookTimeout.TotalSeconds:0.#}s deadline.");
+            }
+
+            if (!response.IsValid)
+            {
+                var firstErr = response.Errors.FirstOrDefault();
+                var field = string.IsNullOrWhiteSpace(firstErr?.Field) ? null : firstErr.Field;
+                var message = string.IsNullOrWhiteSpace(firstErr?.Message)
+                    ? $"Validation rejected by app '{app.AppId}'."
+                    : firstErr.Message;
+
+                throw new RecordValidationException(message, field);
+            }
+
+            if (!string.IsNullOrWhiteSpace(response.ModifiedFieldsJson))
+            {
+                var modified = JsonSerializer.Deserialize<Dictionary<string, object?>>(response.ModifiedFieldsJson, JsonOptions);
+                if (modified is not null)
+                {
+                    foreach (var (k, v) in modified)
+                    {
+                        fields[k] = v;
+                    }
+                }
+            }
+        }
+    }
+
+    public async Task<int> DeliverEventToSubscribersAsync(
+        string eventSpec,
+        object payload,
+        Guid? companyId = null,
+        string? correlationId = null,
+        string? eventId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = tenantContext.TenantId;
+        if (!tenantId.HasValue)
+        {
+            return 0;
+        }
+
+        var installedApps = await dbContext.InstalledApps
+            .AsNoTracking()
+            .OrderBy(a => a.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        var effectiveEventId = string.IsNullOrWhiteSpace(eventId) ? Guid.NewGuid().ToString("D") : eventId;
+        var effectiveCorrelationId = string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString("D") : correlationId;
+        var payloadJson = payload is string rawJson ? rawJson : JsonSerializer.Serialize(payload, JsonOptions);
+        var deliveredCount = 0;
+
+        foreach (var app in installedApps)
+        {
+            var endpoint = orchestrator.ResolveEndpoint(app.AppId, app.Version);
+            if (endpoint is null)
+            {
+                continue;
+            }
+
+            var manifest = JsonSerializer.Deserialize<AppManifest>(app.ManifestJson, JsonOptions);
+            var matchingSubscriptions = manifest?.SubscribedEvents
+                .Where(s => MatchesEventSpec(s, eventSpec))
+                .ToList() ?? [];
+
+            // Even if the manifest didn't list a specific handler name or if it matches by eventSpec,
+            // deliver to each subscribed handler (or once with empty handler name if endpoint is registered for dynamic OnEvent).
+            if (matchingSubscriptions.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var sub in matchingSubscriptions)
+            {
+                try
+                {
+                    var callContext = CreateCallContextProto(tenantId.Value, companyId, effectiveCorrelationId);
+                    using var channel = CreateChannel(endpoint);
+                    var client = new AppService.AppServiceClient(channel);
+
+                    var headers = new Grpc.Core.Metadata();
+                    if (!string.IsNullOrWhiteSpace(_options.CoreCallbackEndpoint))
+                    {
+                        headers.Add("x-erp-core-endpoint", _options.CoreCallbackEndpoint);
+                    }
+
+                    var res = await client.DeliverEventAsync(
+                        new EventDeliveryRequest
+                        {
+                            Context = callContext,
+                            EventId = effectiveEventId,
+                            EventName = eventSpec,
+                            HandlerName = sub.Handler ?? string.Empty,
+                            PayloadJson = payloadJson
+                        },
+                        headers: headers,
+                        cancellationToken: cancellationToken);
+
+                    if (res.Acknowledged)
+                    {
+                        deliveredCount++;
+                    }
+                }
+                catch
+                {
+                    // Architectural Rule 7: Events can never reject a transaction.
+                }
+            }
+        }
+
+        return deliveredCount;
+    }
+
+    public async Task<TOutput?> InvokeInterfaceAsync<TOutput>(
+        string appId,
+        string interfaceId,
+        string operationName,
+        object input,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = tenantContext.TenantId
+            ?? throw new InvalidOperationException("Cannot invoke app interface without an active tenant context.");
+
+        var installedApp = await dbContext.InstalledApps
+            .AsNoTracking()
+            .FirstOrDefaultAsync(a => a.AppId == appId, cancellationToken)
+            ?? throw new KeyNotFoundException($"App '{appId}' is not installed in this tenant.");
+
+        var endpoint = orchestrator.ResolveEndpoint(installedApp.AppId, installedApp.Version)
+            ?? throw new InvalidOperationException($"No running container endpoint registered for app '{appId}@{installedApp.Version}'.");
+
+        var callContext = CreateCallContextProto(tenantId, companyId, Guid.NewGuid().ToString("D"));
+        using var channel = CreateChannel(endpoint);
+        var client = new AppService.AppServiceClient(channel);
+
+        var headers = new Grpc.Core.Metadata();
+        if (!string.IsNullOrWhiteSpace(_options.CoreCallbackEndpoint))
+        {
+            headers.Add("x-erp-core-endpoint", _options.CoreCallbackEndpoint);
+        }
+
+        var response = await client.InvokeInterfaceAsync(
+            new InterfaceCallRequest
+            {
+                Context = callContext,
+                InterfaceId = interfaceId,
+                OperationName = operationName,
+                InputJson = JsonSerializer.Serialize(input, JsonOptions)
+            },
+            headers: headers,
+            deadline: DateTime.UtcNow.Add(_options.SynchronousHookTimeout),
+            cancellationToken: cancellationToken);
+
+        return string.IsNullOrWhiteSpace(response.OutputJson)
+            ? default
+            : JsonSerializer.Deserialize<TOutput>(response.OutputJson, JsonOptions);
+    }
+
+    private CallContextProto CreateCallContextProto(Guid tenantId, Guid? companyId, string correlationId)
+    {
+        var userId = tenantContext.UserId ?? tenantId;
+        var effectiveCompanyId = companyId ?? tenantContext.CompanyId;
+        var accessToken = tokenIssuer?.IssueShortLivedCallToken(
+            tenantId,
+            userId,
+            effectiveCompanyId,
+            lifetime: TimeSpan.FromMinutes(2)) ?? string.Empty;
+
+        return new CallContextProto
+        {
+            TenantId = tenantId.ToString("D"),
+            CompanyId = effectiveCompanyId?.ToString("D") ?? string.Empty,
+            UserId = userId.ToString("D"),
+            CorrelationId = correlationId,
+            AccessToken = accessToken,
+            TodayIso = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+        };
+    }
+
+    private static GrpcChannel CreateChannel(AppGrpcEndpointRegistration endpoint)
+    {
+        var options = new GrpcChannelOptions();
+        if (endpoint.ChannelHandlerFactory is not null)
+        {
+            options.HttpHandler = endpoint.ChannelHandlerFactory();
+        }
+
+        return GrpcChannel.ForAddress(endpoint.Address, options);
+    }
+
+    private static bool MatchesEventSpec(EventSubscriptionDefinition sub, string eventSpec)
+    {
+        var fullSub = $"{sub.EventId}@{sub.Version}";
+        return string.Equals(fullSub, eventSpec, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sub.EventId, eventSpec, StringComparison.OrdinalIgnoreCase);
+    }
+}

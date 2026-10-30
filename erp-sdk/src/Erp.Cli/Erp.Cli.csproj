@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Erp.Cli</RootNamespace>
+    <AssemblyName>erp</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>erp</ToolCommandName>
+    <PackageId>Erp.Cli</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Jens Nymoen</Authors>
+    <License>Apache-2.0</License>
+    <Description>Developer CLI ('erp dev', 'erp validate', 'erp pack') for building apps on the Laftverk ERP platform.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Erp.Sdk\Erp.Sdk.csproj" />
+  </ItemGroup>
+</Project>
+
