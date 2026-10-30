@@ -87,16 +87,21 @@ message InterfaceCallResponse {
   string output_json = 1;
 }
 
+// A migration runs in steps. The core calls RunMigration repeatedly, passing back the checkpoint of the previous
+// step, until the app answers completed = true. The core stores the checkpoint after every step, so a migration that
+// stops half way (crash, deploy, error) is resumed from its last checkpoint instead of starting over.
 message MigrationRunRequest {
   CallContextProto context = 1;
   string from_version = 2;
   string to_version = 3;
   string migration_class = 4;
+  string checkpoint = 5;
 }
 
 message MigrationRunResponse {
   bool completed = 1;
   int32 records_processed = 2;
+  string checkpoint = 3;
 }
 
 // ============================================================================

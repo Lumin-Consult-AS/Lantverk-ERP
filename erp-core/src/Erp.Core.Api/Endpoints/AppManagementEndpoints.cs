@@ -70,18 +70,15 @@ public static class AppManagementEndpoints
                     zipBytes = ms.ToArray();
                 }
 
-                var installed = await appService.InstallPackageAsync(zipBytes, signingKey, ct);
-                return Results.Ok(new
-                {
-                    installed.Id,
-                    installed.AppId,
-                    installed.Version,
-                    installed.Name,
-                    installed.Publisher,
-                    installed.IsDeclarative,
-                    installed.PackageSha256,
-                    installed.PackageStorageKey
-                });
+                return Results.Ok(ToResponse(await appService.InstallPackageAsync(zipBytes, signingKey, ct)));
+            }
+            catch (AppUpgradeException ex)
+            {
+                return Results.Conflict(new { error = ex.Message, errors = ex.Errors });
+            }
+            catch (AppMigrationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message, migration = ex.Run });
             }
             catch (AppPackageSignatureException ex)
             {
@@ -102,7 +99,7 @@ public static class AppManagementEndpoints
             {
                 return Results.BadRequest(new { error = ex.Message });
             }
-        });
+        }).AddEndpointFilter(EventEndpoints.RequireTenantAdminAsync);
 
         v1.MapPost("/apps/install-builtin/{appId}", async (
             string appId,
@@ -118,38 +115,38 @@ public static class AppManagementEndpoints
             try
             {
                 var zipBytes = AppPackageFormat.CreateSignedZipFromDirectory(appDir);
-                var installed = await appService.InstallPackageAsync(zipBytes, null, ct);
-                return Results.Ok(new
-                {
-                    installed.Id,
-                    installed.AppId,
-                    installed.Version,
-                    installed.Name,
-                    installed.Publisher,
-                    installed.IsDeclarative,
-                    installed.PackageSha256,
-                    installed.PackageStorageKey
-                });
+                return Results.Ok(ToResponse(await appService.InstallPackageAsync(zipBytes, null, ct)));
+            }
+            catch (AppUpgradeException ex)
+            {
+                return Results.Conflict(new { error = ex.Message, errors = ex.Errors });
+            }
+            catch (AppMigrationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message, migration = ex.Run });
             }
             catch (AppManifestValidationException ex)
             {
                 return Results.BadRequest(new { error = ex.Message, errors = ex.Errors });
             }
-        });
+        }).AddEndpointFilter(EventEndpoints.RequireTenantAdminAsync);
 
+        // Uninstalling archives the app's data for the grace period; purge=true deletes the tenant's data at once.
         v1.MapDelete("/apps/{appId}", async (
             string appId,
+            bool? purge,
             AppInstallationService appService,
             CancellationToken ct) =>
         {
             try
             {
-                var snapshot = await appService.UninstallAppAsync(appId, ct);
+                var result = await appService.UninstallAppAsync(appId, purge ?? false, ct);
                 return Results.Ok(new
                 {
                     uninstalledAppId = appId,
-                    snapshotNumber = snapshot.SnapshotNumber,
-                    triggerAction = snapshot.TriggerAction
+                    snapshotNumber = result.Snapshot.SnapshotNumber,
+                    triggerAction = result.Snapshot.TriggerAction,
+                    archive = result.Archive
                 });
             }
             catch (KeyNotFoundException ex)
@@ -160,7 +157,7 @@ public static class AppManagementEndpoints
             {
                 return Results.Conflict(new { error = ex.Message });
             }
-        });
+        }).AddEndpointFilter(EventEndpoints.RequireTenantAdminAsync);
 
         v1.MapGet("/apps/containers", (KubernetesAppOrchestrator orchestrator) =>
             Results.Ok(orchestrator.GetAllDeployments()));
@@ -197,6 +194,90 @@ public static class AppManagementEndpoints
                 snapshot = JsonSerializer.Deserialize<JsonElement>(s.SnapshotJson)
             }));
         });
+
+        // "What did the schema look like then": a snapshot by number, the one in force at a time, or the difference of two.
+        v1.MapGet("/metadata/snapshots/{number:int}", async (int number, AppInstallationService appService, CancellationToken ct) =>
+            await appService.GetSnapshotAsync(number, ct) is { } snapshot
+                ? Results.Ok(ToSnapshotResponse(snapshot, objectId: null))
+                : Results.NotFound(new { error = $"Snapshot {number} was not found." }));
+
+        v1.MapGet("/metadata/snapshots/at", async (DateTimeOffset at, string? objectId, AppInstallationService appService, CancellationToken ct) =>
+            await appService.GetSnapshotAtAsync(at, ct) is { } snapshot
+                ? Results.Ok(ToSnapshotResponse(snapshot, objectId))
+                : Results.NotFound(new { error = $"No snapshot existed at {at:O}." }));
+
+        v1.MapGet("/metadata/snapshots/diff", async (int from, int to, AppInstallationService appService, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(new { from, to, changes = await appService.DiffSnapshotsAsync(from, to, ct) });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+        });
+
+        // Data migrations run by upgrades: progress, checkpoint and errors per migration.
+        v1.MapGet("/apps/migrations", async (string? appId, AppMigrationService migrations, CancellationToken ct) =>
+            Results.Ok(await migrations.ListAsync(appId, ct)));
+
+        v1.MapGet("/apps/archives", async (AppRetentionService retention, CancellationToken ct) =>
+            Results.Ok(await retention.ListAsync(ct)));
+
+        v1.MapPost("/apps/archives/{id:guid}/purge", async (Guid id, AppRetentionService retention, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await retention.PurgeAsync(id, ct));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (RecordValidationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
+        }).AddEndpointFilter(EventEndpoints.RequireTenantAdminAsync);
+    }
+
+    private static object ToResponse(AppInstallResult result) => new
+    {
+        result.App.Id,
+        result.App.AppId,
+        result.App.Version,
+        result.App.Name,
+        result.App.Publisher,
+        result.App.IsDeclarative,
+        result.App.PackageSha256,
+        result.App.PackageStorageKey,
+        outcome = result.Outcome,
+        fromVersion = result.FromVersion,
+        changes = result.Changes,
+        migrations = result.Migrations,
+        archive = result.Archive
+    };
+
+    private static object ToSnapshotResponse(Erp.Core.Domain.Entities.MetadataSnapshot snapshot, string? objectId)
+    {
+        var json = JsonSerializer.Deserialize<JsonElement>(snapshot.SnapshotJson);
+        object? content = json;
+        if (!string.IsNullOrWhiteSpace(objectId) && json.TryGetProperty("objects", out var objects))
+        {
+            content = objects.EnumerateArray().FirstOrDefault(o =>
+                o.TryGetProperty("id", out var id) && string.Equals(id.GetString(), objectId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return new
+        {
+            snapshot.SnapshotNumber,
+            snapshot.TriggerAction,
+            snapshot.TriggerAppId,
+            snapshot.TriggerAppVersion,
+            capturedAt = snapshot.CreatedAt,
+            content
+        };
     }
 
     private static string? ResolveManifestSchemaPath()

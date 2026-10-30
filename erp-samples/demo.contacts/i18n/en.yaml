@@ -9,6 +9,7 @@ contacts:
   fields:
     party: Party
     text: Note text
+    priority: Priority
     followUp: Follow-up date
     preferredChannel: Preferred channel
 

@@ -183,6 +183,99 @@ public sealed class MetadataRegistryService(
         return affectedObjects;
     }
 
+    /// <summary>
+    /// Drops from the tenant's metadata what <paramref name="appId"/> owned but no longer declares in
+    /// <paramref name="current"/> (the version being upgraded to): objects, enums, events and interfaces, and fields it owns on
+    /// objects. Removed fields become orphaned columns (kept until <paramref name="dropAfter"/>); the physical tables and
+    /// columns are never touched here. Returns the ids of the removed objects, whose data the caller archives.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> ReconcileOwnedAsync(
+        string appId,
+        MetadataBundle current,
+        DateTimeOffset dropAfter,
+        CancellationToken cancellationToken = default)
+    {
+        var keepObjects = current.Objects.Select(o => o.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var keepEnums = current.Enums.Select(o => o.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var keepEvents = current.Events.Select(o => o.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var keepInterfaces = current.Interfaces.Select(o => o.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var removedObjects = new List<string>();
+        var owned = await dbContext.MetadataItems.Where(m => m.OwnerApp == appId).ToListAsync(cancellationToken);
+        foreach (var item in owned)
+        {
+            var kept = item.Kind switch
+            {
+                "object" => keepObjects.Contains(item.ItemId),
+                "enum" => keepEnums.Contains(item.ItemId),
+                "event" => keepEvents.Contains(item.ItemId),
+                "interface" => keepInterfaces.Contains(item.ItemId),
+                _ => true
+            };
+
+            if (!kept)
+            {
+                dbContext.MetadataItems.Remove(item);
+                if (item.Kind == "object")
+                {
+                    removedObjects.Add(item.ItemId);
+                }
+            }
+        }
+
+        // Fields the app owns, on its own objects and as extensions of other apps' objects
+        var objectItems = await dbContext.MetadataItems.Where(m => m.Kind == "object").ToListAsync(cancellationToken);
+        foreach (var item in objectItems.Where(i => !removedObjects.Contains(i.ItemId, StringComparer.OrdinalIgnoreCase)))
+        {
+            var definition = JsonSerializer.Deserialize<ObjectDefinition>(item.DefinitionJson, JsonOptions);
+            if (definition is null)
+            {
+                continue;
+            }
+
+            var currentNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var own = current.Objects.FirstOrDefault(o => string.Equals(o.Id, definition.Id, StringComparison.OrdinalIgnoreCase));
+            if (own is not null)
+            {
+                currentNames.UnionWith(own.Fields.Select(f => f.Name));
+            }
+
+            foreach (var ext in current.Extensions.Where(e => string.Equals(e.TargetObject, definition.Id, StringComparison.OrdinalIgnoreCase)))
+            {
+                currentNames.UnionWith(ext.Fields.Select(f => f.Name));
+            }
+
+            var removed = definition.Fields
+                .Where(f => string.Equals(f.OwnerApp, appId, StringComparison.OrdinalIgnoreCase) && !currentNames.Contains(f.Name))
+                .ToList();
+            if (removed.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var field in removed)
+            {
+                var column = field.GetColumnName(definition.OwnerApp);
+                definition.OrphanedColumns.RemoveAll(o => string.Equals(o.ColumnName, column, StringComparison.OrdinalIgnoreCase));
+                definition.OrphanedColumns.Add(new OrphanedColumnDefinition
+                {
+                    ColumnName = column,
+                    FieldName = field.Name,
+                    FormerOwnerApp = appId,
+                    Type = field.Type,
+                    OrphanedAt = DateTimeOffset.UtcNow,
+                    DropAfter = dropAfter
+                });
+            }
+
+            definition.Fields.RemoveAll(f => removed.Contains(f));
+            item.DefinitionJson = JsonSerializer.Serialize(definition, JsonOptions);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return removedObjects;
+    }
+
     public async Task<ObjectDefinition?> GetObjectAsync(string objectId, CancellationToken cancellationToken = default)
     {
         var item = await dbContext.MetadataItems

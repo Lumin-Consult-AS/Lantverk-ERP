@@ -64,6 +64,29 @@ public sealed class OnEventAttribute(string eventSpec) : Attribute
     public string EventSpec { get; } = eventSpec;
 }
 
+/// <summary>
+/// Marks a data migration declared in the manifest (<c>migrations: - run: Migrations.V110</c>). The method takes
+/// <see cref="AppContext"/>, <see cref="MigrationState"/> and a <see cref="CancellationToken"/> (all optional) and
+/// returns <c>Task&lt;MigrationStep&gt;</c>. It works through the tenant's data in batches through the data API and must
+/// be idempotent: after a failure the core calls it again with the checkpoint of the last completed step.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class MigrationAttribute(string name) : Attribute
+{
+    public string Name { get; } = name;
+}
+
+/// <summary>Where a migration is: the versions it moves between and the checkpoint of the previous step, if any.</summary>
+public sealed record MigrationState(string FromVersion, string ToVersion, string? Checkpoint);
+
+/// <summary>The result of one migration step: finished, or a checkpoint to continue from.</summary>
+public sealed record MigrationStep(bool Completed, int RecordsProcessed, string? Checkpoint)
+{
+    public static MigrationStep Done(int recordsProcessed = 0) => new(true, recordsProcessed, null);
+
+    public static MigrationStep Continue(string checkpoint, int recordsProcessed = 0) => new(false, recordsProcessed, checkpoint);
+}
+
 public sealed record ValidationFailure(string Field, string Message);
 
 public sealed class ValidationResult
