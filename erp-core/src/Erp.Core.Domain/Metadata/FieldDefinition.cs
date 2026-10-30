@@ -1,3 +1,5 @@
+using Erp.Core.Domain.Data;
+
 namespace Erp.Core.Domain.Metadata;
 
 /// <summary>
@@ -14,6 +16,24 @@ public sealed class FieldDefinition
     public object? DefaultValue { get; set; }
     public int? MaxLength { get; set; }
     public int? Scale { get; set; }
+    public decimal? MinValue { get; set; }
+    public decimal? MaxValue { get; set; }
+    public string? Pattern { get; set; }
+
+    /// <summary>
+    /// Declarative condition under which this field becomes required.
+    /// </summary>
+    public FilterNode? RequiredWhen { get; set; }
+
+    /// <summary>
+    /// Declarative condition under which this field becomes read-only.
+    /// </summary>
+    public FilterNode? ReadOnlyWhen { get; set; }
+
+    /// <summary>
+    /// Declarative condition under which this field is visible in the UI.
+    /// </summary>
+    public FilterNode? VisibleWhen { get; set; }
 
     /// <summary>
     /// Target object ID (e.g. <c>core.party</c>) when <see cref="Type"/> is <see cref="FieldType.Reference"/>.

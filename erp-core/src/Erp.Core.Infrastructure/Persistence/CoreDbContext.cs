@@ -23,6 +23,8 @@ public sealed class CoreDbContext(
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<User> Users => Set<User>();
     public DbSet<MetadataItem> MetadataItems => Set<MetadataItem>();
+    public DbSet<InstalledApp> InstalledApps => Set<InstalledApp>();
+    public DbSet<MetadataSnapshot> MetadataSnapshots => Set<MetadataSnapshot>();
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -39,6 +41,8 @@ public sealed class CoreDbContext(
         ConfigureCompany(modelBuilder.Entity<Company>());
         ConfigureUser(modelBuilder.Entity<User>());
         ConfigureMetadataItem(modelBuilder.Entity<MetadataItem>());
+        ConfigureInstalledApp(modelBuilder.Entity<InstalledApp>());
+        ConfigureMetadataSnapshot(modelBuilder.Entity<MetadataSnapshot>());
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -387,5 +391,100 @@ public sealed class CoreDbContext(
             .IsRequired();
 
         builder.HasIndex(e => new { e.TenantId, e.Kind, e.ItemId }).IsUnique();
+    }
+
+    private static void ConfigureInstalledApp(EntityTypeBuilder<InstalledApp> builder)
+    {
+        ConfigureEntityBase(builder, "installed_app");
+
+        builder.Property(e => e.AppId)
+            .HasColumnName("app_id")
+            .HasMaxLength(128)
+            .IsRequired();
+
+        builder.Property(e => e.Version)
+            .HasColumnName("version")
+            .HasMaxLength(64)
+            .IsRequired();
+
+        builder.Property(e => e.Name)
+            .HasColumnName("name")
+            .HasMaxLength(200)
+            .IsRequired();
+
+        builder.Property(e => e.Publisher)
+            .HasColumnName("publisher")
+            .HasMaxLength(200);
+
+        builder.Property(e => e.IsDeclarative)
+            .HasColumnName("is_declarative")
+            .IsRequired();
+
+        builder.Property(e => e.ContainerImage)
+            .HasColumnName("container_image")
+            .HasMaxLength(500);
+
+        builder.Property(e => e.PackageSha256)
+            .HasColumnName("package_sha256")
+            .HasMaxLength(64)
+            .IsRequired();
+
+        builder.Property(e => e.PackageStorageKey)
+            .HasColumnName("package_storage_key")
+            .HasMaxLength(500)
+            .IsRequired();
+
+        builder.Property(e => e.ManifestJson)
+            .HasColumnName("manifest_json")
+            .HasColumnType("jsonb")
+            .IsRequired();
+
+        builder.Property(e => e.PagesJson)
+            .HasColumnName("pages_json")
+            .HasColumnType("jsonb")
+            .IsRequired();
+
+        builder.Property(e => e.PermissionSetsJson)
+            .HasColumnName("permission_sets_json")
+            .HasColumnType("jsonb")
+            .IsRequired();
+
+        builder.Property(e => e.TranslationsJson)
+            .HasColumnName("translations_json")
+            .HasColumnType("jsonb")
+            .IsRequired();
+
+        builder.HasIndex(e => new { e.TenantId, e.AppId }).IsUnique();
+    }
+
+    private static void ConfigureMetadataSnapshot(EntityTypeBuilder<MetadataSnapshot> builder)
+    {
+        ConfigureEntityBase(builder, "metadata_snapshot");
+
+        builder.Property(e => e.SnapshotNumber)
+            .HasColumnName("snapshot_number")
+            .IsRequired();
+
+        builder.Property(e => e.TriggerAction)
+            .HasColumnName("trigger_action")
+            .HasMaxLength(64)
+            .IsRequired();
+
+        builder.Property(e => e.TriggerAppId)
+            .HasColumnName("trigger_app_id")
+            .HasMaxLength(128)
+            .IsRequired();
+
+        builder.Property(e => e.TriggerAppVersion)
+            .HasColumnName("trigger_app_version")
+            .HasMaxLength(64)
+            .IsRequired();
+
+        builder.Property(e => e.SnapshotJson)
+            .HasColumnName("snapshot_json")
+            .HasColumnType("jsonb")
+            .IsRequired();
+
+        builder.HasIndex(e => new { e.TenantId, e.SnapshotNumber }).IsUnique();
     }
 }

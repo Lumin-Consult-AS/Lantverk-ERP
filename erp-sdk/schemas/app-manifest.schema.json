@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.erp.sdk/v1/app-manifest.schema.json",
+  "title": "ERP App Manifest (app.yaml)",
+  "description": "Schema for validating ERP application manifests (app.yaml) in Phase 1.",
+  "type": "object",
+  "required": ["id", "version", "name"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+      "description": "Unique application identifier (e.g. 'core.parties', 'demo.contacts')."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+      "description": "Semantic version (MAJOR.MINOR.PATCH)."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable display name of the application."
+    },
+    "publisher": {
+      "type": "string",
+      "description": "Publisher organization or developer name."
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier or 'proprietary'."
+    },
+    "sdk": {
+      "type": "string",
+      "description": "Supported SDK semantic version range (e.g. '>=1.0 <2.0')."
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Map of required app IDs to their semantic version ranges."
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["image"],
+      "additionalProperties": false,
+      "description": "Container runtime configuration. Omit for purely declarative apps.",
+      "properties": {
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": { "type": "string" },
+            "memory": { "type": "string" }
+          }
+        },
+        "egress": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Explicit whitelist of external hostnames or HTTPS URL origins."
+        }
+      }
+    },
+    "objects": {
+      "type": "object",
+      "description": "Domain objects owned by this application."
+    },
+    "extensions": {
+      "type": "object",
+      "description": "Field extensions added to objects owned by other applications."
+    },
+    "enums": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 1
+      },
+      "description": "Named enumeration value lists."
+    },
+    "interfaces": {
+      "type": "object",
+      "description": "Contract interfaces defined by this application."
+    },
+    "events": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "publishes": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "object" }
+            ]
+          }
+        },
+        "subscribes": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "object" }
+            ]
+          }
+        }
+      }
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "required": ["extend", "file"],
+            "properties": {
+              "extend": { "type": "string" },
+              "file": { "type": "string" }
+            }
+          }
+        ]
+      }
+    },
+    "permissionSets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "grants"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "grants": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["read", "create", "update", "delete", "post", "approve"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "migrations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "run"],
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "run": { "type": "string" }
+        }
+      }
+    },
+    "attention": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "source", "severity"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "source": { "type": "object" },
+          "severity": {
+            "type": "string",
+            "enum": ["action", "warning", "info"]
+          },
+          "audience": { "type": "object" },
+          "action": { "type": "object" }
+        }
+      }
+    }
+  }
+}
+

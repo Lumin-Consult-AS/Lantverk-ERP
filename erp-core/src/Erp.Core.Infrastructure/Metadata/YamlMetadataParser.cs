@@ -1,6 +1,7 @@
 using System.Globalization;
 using Erp.Core.Domain.Data;
 using Erp.Core.Domain.Metadata;
+using Erp.Core.Infrastructure.Data;
 using YamlDotNet.Serialization;
 
 namespace Erp.Core.Infrastructure.Metadata;
@@ -267,6 +268,12 @@ public static class YamlMetadataParser
                 DefaultValue = fNode.TryGetValue("default", out var defVal) ? defVal : null,
                 MaxLength = GetInt(fNode, "maxLength") ?? GetInt(fNode, "length"),
                 Scale = GetInt(fNode, "scale"),
+                MinValue = GetDecimal(fNode, "minValue") ?? GetDecimal(fNode, "min"),
+                MaxValue = GetDecimal(fNode, "maxValue") ?? GetDecimal(fNode, "max"),
+                Pattern = GetString(fNode, "pattern"),
+                RequiredWhen = fNode.TryGetValue("requiredWhen", out var reqWhen) ? ParseWhenRule(reqWhen) : null,
+                ReadOnlyWhen = fNode.TryGetValue("readOnlyWhen", out var roWhen) ? ParseWhenRule(roWhen) : null,
+                VisibleWhen = fNode.TryGetValue("visibleWhen", out var visWhen) ? ParseWhenRule(visWhen) : null,
                 TargetObject = GetString(fNode, "to") ?? GetString(fNode, "targetObject"),
                 OnDelete = onDelete,
                 EnumType = GetString(fNode, "of") ?? GetString(fNode, "enumType")
@@ -274,6 +281,106 @@ public static class YamlMetadataParser
         }
 
         return fields;
+    }
+
+    public static FilterNode? ParseWhenRule(object? rawNode)
+    {
+        if (rawNode is null)
+        {
+            return null;
+        }
+
+        if (rawNode is string exprStr)
+        {
+            return FilterExpressionParser.Parse(exprStr);
+        }
+
+        if (rawNode is not IDictionary<object, object> map)
+        {
+            throw new MetadataValidationException("Declarative 'when' rule must be a string expression or a YAML mapping.");
+        }
+
+        if (map.TryGetValue("and", out var andObj) && andObj is IEnumerable<object> andList)
+        {
+            var clauses = andList.Select(ParseWhenRule).Where(c => c is not null).Cast<FilterNode>().ToList();
+            return new FilterGroup(LogicalOperator.And, clauses);
+        }
+
+        if (map.TryGetValue("or", out var orObj) && orObj is IEnumerable<object> orList)
+        {
+            var clauses = orList.Select(ParseWhenRule).Where(c => c is not null).Cast<FilterNode>().ToList();
+            return new FilterGroup(LogicalOperator.Or, clauses);
+        }
+
+        var field = GetString(map, "field")
+            ?? throw new MetadataValidationException("Declarative 'when' condition must specify 'field'.");
+
+        if (map.TryGetValue("operator", out var opObj) && opObj is not null)
+        {
+            var op = ParseFilterOperator(opObj.ToString() ?? "eq");
+            map.TryGetValue("value", out var val);
+            return new FilterCondition(field, op, NormalizeYamlScalarOrList(val));
+        }
+
+        foreach (var (key, opEnum) in OperatorKeys)
+        {
+            if (map.TryGetValue(key, out var val))
+            {
+                return new FilterCondition(field, opEnum, NormalizeYamlScalarOrList(val));
+            }
+        }
+
+        throw new MetadataValidationException($"Declarative 'when' condition for field '{field}' is missing a valid operator (eq, ne, gt, ge, lt, le, in, contains, isEmpty).");
+    }
+
+    private static readonly (string Key, FilterOperator Op)[] OperatorKeys =
+    [
+        ("eq", FilterOperator.Eq),
+        ("ne", FilterOperator.Ne),
+        ("gt", FilterOperator.Gt),
+        ("ge", FilterOperator.Ge),
+        ("lt", FilterOperator.Lt),
+        ("le", FilterOperator.Le),
+        ("in", FilterOperator.In),
+        ("contains", FilterOperator.Contains),
+        ("isEmpty", FilterOperator.IsEmpty)
+    ];
+
+    private static FilterOperator ParseFilterOperator(string op) => op.Trim().ToLowerInvariant() switch
+    {
+        "eq" => FilterOperator.Eq,
+        "ne" => FilterOperator.Ne,
+        "gt" => FilterOperator.Gt,
+        "ge" => FilterOperator.Ge,
+        "lt" => FilterOperator.Lt,
+        "le" => FilterOperator.Le,
+        "in" => FilterOperator.In,
+        "contains" => FilterOperator.Contains,
+        "isempty" or "is_empty" => FilterOperator.IsEmpty,
+        _ => throw new MetadataValidationException($"Unsupported 'when' operator '{op}'.")
+    };
+
+    private static object? NormalizeYamlScalarOrList(object? raw)
+    {
+        if (raw is IEnumerable<object> list)
+        {
+            return list.Select(NormalizeYamlScalarOrList).ToList();
+        }
+
+        if (raw is string s)
+        {
+            if (bool.TryParse(s, out var b))
+            {
+                return b;
+            }
+
+            if (decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var d))
+            {
+                return d;
+            }
+        }
+
+        return raw;
     }
 
     private static FieldType ParseFieldType(string typeStr) => typeStr.Trim().ToLowerInvariant() switch
@@ -323,5 +430,8 @@ public static class YamlMetadataParser
 
     private static int? GetInt(IDictionary<object, object> map, string key)
         => map.TryGetValue(key, out var val) && int.TryParse(val?.ToString(), CultureInfo.InvariantCulture, out var i) ? i : null;
+
+    private static decimal? GetDecimal(IDictionary<object, object> map, string key)
+        => map.TryGetValue(key, out var val) && decimal.TryParse(val?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var d) ? d : null;
 }
 

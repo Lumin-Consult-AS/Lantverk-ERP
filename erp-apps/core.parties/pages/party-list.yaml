@@ -1,0 +1,14 @@
+id: core.party-list
+type: list
+object: core.party
+title: parties.list.title
+columns:
+  - partyNumber
+  - name
+  - partyType
+  - role
+  - organizationNumber
+  - email
+  - phone
+  - isActive
+

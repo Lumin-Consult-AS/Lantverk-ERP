@@ -1,0 +1,18 @@
+parties:
+  list:
+    title: Parties (customers and suppliers)
+  card:
+    general: General
+    contact: Contact information
+    addresses: Addresses
+    contacts: Contact persons
+  fields:
+    partyNumber: Party number
+    name: Name
+    partyType: Party type
+    role: Role
+    organizationNumber: Organization number
+    email: Email
+    phone: Phone
+    isActive: Active
+

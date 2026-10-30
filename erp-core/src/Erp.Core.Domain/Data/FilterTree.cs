@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Erp.Core.Domain.Data;
 
 public enum FilterOperator
@@ -22,6 +24,9 @@ public enum LogicalOperator
 /// <summary>
 /// Base node in a filter expression tree.
 /// </summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+[JsonDerivedType(typeof(FilterCondition), "condition")]
+[JsonDerivedType(typeof(FilterGroup), "group")]
 public abstract record FilterNode;
 
 /// <summary>

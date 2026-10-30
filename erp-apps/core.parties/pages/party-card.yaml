@@ -1,0 +1,42 @@
+id: core.party-card
+type: card
+object: core.party
+title: "{partyNumber} – {name}"
+groups:
+  - label: parties.card.general
+    fields:
+      - partyNumber
+      - name
+      - partyType
+      - role
+      - organizationNumber
+      - isActive
+  - label: parties.card.contact
+    fields:
+      - email
+      - phone
+tabs:
+  - label: parties.card.addresses
+    list:
+      object: core.partyaddress
+      filter:
+        party: "{id}"
+      fields:
+        - addressType
+        - streetLine1
+        - postalCode
+        - city
+        - countryCode
+        - isPrimary
+  - label: parties.card.contacts
+    list:
+      object: core.partycontact
+      filter:
+        party: "{id}"
+      fields:
+        - fullName
+        - roleTitle
+        - email
+        - phone
+        - isPrimary
+
