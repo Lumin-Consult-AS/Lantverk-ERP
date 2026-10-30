@@ -6,6 +6,7 @@ using Erp.Core.Api.Auth;
 using Erp.Core.Api.Endpoints;
 using Erp.Core.Api.Middleware;
 using Erp.Core.Domain.Tenancy;
+using Erp.Core.Infrastructure.Apps;
 using Erp.Core.Infrastructure.Data;
 using Erp.Core.Infrastructure.Metadata;
 using Erp.Core.Infrastructure.Persistence;
@@ -27,6 +28,8 @@ builder.Services.AddScoped<TenantSessionInterceptor>();
 builder.Services.AddScoped<InternalTokenService>();
 builder.Services.AddScoped<MetadataRegistryService>();
 builder.Services.AddScoped<RecordDataService>();
+builder.Services.AddSingleton<IAppPackageStorage>(_ => new LocalAppPackageStorage());
+builder.Services.AddScoped<AppInstallationService>();
 
 builder.Services.AddDbContext<CoreDbContext>((sp, options) =>
 {
@@ -193,6 +196,11 @@ v1.MapGet("/session", async (
         ? await db.Companies.AsNoTracking().FirstOrDefaultAsync(c => c.Id == tenantContext.CompanyId.Value, cancellationToken)
         : null;
 
+    var installedApps = await db.InstalledApps.AsNoTracking()
+        .OrderBy(a => a.AppId)
+        .Select(a => new { a.AppId, a.Version, a.Name, a.IsDeclarative })
+        .ToListAsync(cancellationToken);
+
     return Results.Ok(new
     {
         tenant = new
@@ -218,7 +226,7 @@ v1.MapGet("/session", async (
             user.Roles,
             user.AccessibleCompanyIds
         },
-        installedApps = Array.Empty<object>(),
+        installedApps,
         navigation = Array.Empty<object>()
     });
 });
@@ -241,6 +249,7 @@ v1.MapGet("/core/users", async (CoreDbContext db, CancellationToken ct) =>
     Results.Ok(await db.Users.AsNoTracking().OrderBy(u => u.DisplayName).ToListAsync(ct)));
 
 v1.MapMetadataAndDataEndpoints();
+v1.MapAppManagementEndpoints();
 
 app.MapGet("/", () => Results.Content(LandingPageHtml.Content, "text/html; charset=utf-8"))
     .AllowAnonymous();

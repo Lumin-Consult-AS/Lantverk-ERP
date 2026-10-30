@@ -1,0 +1,18 @@
+parties:
+  list:
+    title: Parter (kunder og leverandører)
+  card:
+    general: Generelt
+    contact: Kontaktinformasjon
+    addresses: Adresser
+    contacts: Kontaktpersoner
+  fields:
+    partyNumber: Partnummer
+    name: Navn
+    partyType: Partstype
+    role: Rolle
+    organizationNumber: Organisasjonsnummer
+    email: E-post
+    phone: Telefon
+    isActive: Aktiv
+

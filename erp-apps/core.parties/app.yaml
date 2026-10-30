@@ -1,0 +1,166 @@
+id: core.parties
+version: 1.0.0
+name: Parter
+publisher: Laftverk
+license: proprietary
+sdk: ">=1.0.0 <2.0.0"
+
+enums:
+  core.partytype: [organization, person]
+  core.partyrole: [customer, supplier, both]
+  core.addresstype: [postal, delivery, invoice, visiting]
+
+objects:
+  core.party:
+    label: Part
+    fields:
+      partyNumber:
+        type: string
+        required: true
+        maxLength: 32
+        label: Partnummer
+      name:
+        type: string
+        required: true
+        maxLength: 200
+        label: Navn
+      partyType:
+        type: enum
+        of: core.partytype
+        required: true
+        default: organization
+        label: Partstype
+      role:
+        type: enum
+        of: core.partyrole
+        required: true
+        default: customer
+        label: Rolle
+      organizationNumber:
+        type: string
+        maxLength: 20
+        pattern: "^[0-9]{9}$"
+        requiredWhen:
+          field: partyType
+          eq: organization
+        label: Organisasjonsnummer
+      email:
+        type: string
+        maxLength: 254
+        label: E-post
+      phone:
+        type: string
+        maxLength: 50
+        label: Telefon
+      isActive:
+        type: boolean
+        required: true
+        default: true
+        label: Aktiv
+    keys:
+      - name: uk_party_number
+        fields: [partyNumber]
+        scopeToCompany: true
+
+  core.partyaddress:
+    label: Adresse
+    fields:
+      party:
+        type: reference
+        to: core.party
+        required: true
+        onDelete: cascade
+        label: Part
+      addressType:
+        type: enum
+        of: core.addresstype
+        required: true
+        default: postal
+        label: Adressetype
+      streetLine1:
+        type: string
+        required: true
+        maxLength: 200
+        label: Adresselinje 1
+      streetLine2:
+        type: string
+        maxLength: 200
+        label: Adresselinje 2
+      postalCode:
+        type: string
+        required: true
+        maxLength: 20
+        label: Postnummer
+      city:
+        type: string
+        required: true
+        maxLength: 100
+        label: Poststed
+      countryCode:
+        type: string
+        required: true
+        maxLength: 2
+        default: "NO"
+        label: Landkode
+      isPrimary:
+        type: boolean
+        required: true
+        default: false
+        label: Primæradresse
+
+  core.partycontact:
+    label: Kontaktperson
+    fields:
+      party:
+        type: reference
+        to: core.party
+        required: true
+        onDelete: cascade
+        label: Part
+      fullName:
+        type: string
+        required: true
+        maxLength: 200
+        label: Fullt navn
+      roleTitle:
+        type: string
+        maxLength: 100
+        label: Tittel
+      email:
+        type: string
+        maxLength: 254
+        label: E-post
+      phone:
+        type: string
+        maxLength: 50
+        label: Telefon
+      isPrimary:
+        type: boolean
+        required: true
+        default: false
+        label: Primærkontakt
+
+events:
+  publishes:
+    - core.party.created@1
+    - core.party.updated@1
+    - core.party.deleted@1
+
+pages:
+  - pages/party-list.yaml
+  - pages/party-card.yaml
+
+permissionSets:
+  - id: core.parties.reader
+    label: Parter – lesetilgang
+    grants:
+      core.party: [read]
+      core.partyaddress: [read]
+      core.partycontact: [read]
+  - id: core.parties.manager
+    label: Parter – full tilgang
+    grants:
+      core.party: [read, create, update, delete]
+      core.partyaddress: [read, create, update, delete]
+      core.partycontact: [read, create, update, delete]
+

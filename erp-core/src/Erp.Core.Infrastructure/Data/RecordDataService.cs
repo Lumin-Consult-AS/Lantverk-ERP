@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Erp.Core.Domain.Data;
 using Erp.Core.Domain.Metadata;
 using Erp.Core.Domain.Tenancy;
@@ -183,6 +184,8 @@ public sealed class RecordDataService(
             AddParameter(cmd, "updated_by", userId);
             AddParameter(cmd, "row_version", 1L);
 
+            var effectiveFields = BuildEffectiveFieldsForCreate(fields, objectDef);
+
             var pIdx = 0;
             foreach (var field in objectDef.Fields)
             {
@@ -200,6 +203,15 @@ public sealed class RecordDataService(
                             $"Field '{field.Name}' on '{objectDef.Id}' is required.",
                             field.Name);
                     }
+                }
+
+                if (field.RequiredWhen is not null
+                    && WhenRuleEvaluator.Evaluate(field.RequiredWhen, effectiveFields)
+                    && (!hasValue || WhenRuleEvaluator.IsValueEmpty(rawValue)))
+                {
+                    throw new RecordValidationException(
+                        $"Field '{field.Name}' on '{objectDef.Id}' is required under the current conditions.",
+                        field.Name);
                 }
 
                 if (!hasValue)
@@ -251,6 +263,11 @@ public sealed class RecordDataService(
 
         return await ExecuteWithConnectionAsync(async (conn, tx) =>
         {
+            if (objectDef.Fields.Any(f => f.RequiredWhen is not null || f.ReadOnlyWhen is not null))
+            {
+                await ValidateConditionalRulesOnUpdateAsync(conn, tx, objectDef, id, fields, cancellationToken);
+            }
+
             await using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
 
@@ -544,6 +561,7 @@ public sealed class RecordDataService(
             else
             {
                 var money = CoerceToMoney(rawValue, field.Name);
+                ValidateNumericRange(field, money.Amount);
                 AddParameter(cmd, amountParam, money.Amount);
                 AddParameter(cmd, currencyParam, money.Currency);
             }
@@ -601,19 +619,34 @@ public sealed class RecordDataService(
                         $"Field '{field.Name}' exceeds maximum length of {maxLen}.",
                         field.Name);
                 }
+                ValidatePattern(field, str);
                 return str;
             }
             case FieldType.Text:
-                return Convert.ToString(unwrapped, CultureInfo.InvariantCulture) ?? string.Empty;
+            {
+                var str = Convert.ToString(unwrapped, CultureInfo.InvariantCulture) ?? string.Empty;
+                if (field.MaxLength.HasValue && str.Length > field.MaxLength.Value)
+                {
+                    throw new RecordValidationException(
+                        $"Field '{field.Name}' exceeds maximum length of {field.MaxLength.Value}.",
+                        field.Name);
+                }
+                ValidatePattern(field, str);
+                return str;
+            }
 
             case FieldType.Integer:
-                if (unwrapped is long l) return l;
-                if (unwrapped is int i) return (long)i;
-                if (long.TryParse(Convert.ToString(unwrapped, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedLong))
+            {
+                long intVal;
+                if (unwrapped is long l) intVal = l;
+                else if (unwrapped is int i) intVal = i;
+                else if (!long.TryParse(Convert.ToString(unwrapped, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out intVal))
                 {
-                    return parsedLong;
+                    throw new RecordValidationException($"Field '{field.Name}' must be an integer.", field.Name);
                 }
-                throw new RecordValidationException($"Field '{field.Name}' must be an integer.", field.Name);
+                ValidateNumericRange(field, intVal);
+                return intVal;
+            }
 
             case FieldType.Decimal:
             {
@@ -627,6 +660,7 @@ public sealed class RecordDataService(
                     throw new RecordValidationException($"Field '{field.Name}' must be a decimal number.", field.Name);
                 }
 
+                ValidateNumericRange(field, dec);
                 var scale = Math.Clamp(field.Scale ?? 2, 0, 10);
                 return Math.Round(dec, scale, MidpointRounding.AwayFromZero);
             }
@@ -1060,6 +1094,125 @@ public sealed class RecordDataService(
             if (shouldClose)
             {
                 await connection.CloseAsync();
+            }
+        }
+    }
+
+    private static Dictionary<string, object?> BuildEffectiveFieldsForCreate(
+        IDictionary<string, object?> input,
+        ObjectDefinition objectDef)
+    {
+        var effective = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in objectDef.Fields)
+        {
+            var exposedName = GetExposedFieldName(field, objectDef.OwnerApp);
+            if (TryGetFieldInput(input, field, objectDef.OwnerApp, out var val) && val is not null)
+            {
+                effective[field.Name] = val;
+                effective[exposedName] = val;
+            }
+            else if (field.DefaultValue is not null)
+            {
+                effective[field.Name] = field.DefaultValue;
+                effective[exposedName] = field.DefaultValue;
+            }
+        }
+        return effective;
+    }
+
+    private async Task ValidateConditionalRulesOnUpdateAsync(
+        DbConnection conn,
+        DbTransaction? tx,
+        ObjectDefinition objectDef,
+        Guid id,
+        IDictionary<string, object?> updateFields,
+        CancellationToken cancellationToken)
+    {
+        var (schema, table) = objectDef.GetSchemaAndTable();
+        await using var cmd = CreateCommand(
+            conn,
+            tx,
+            $"""SELECT * FROM "{schema}"."{table}" WHERE id = @id;""");
+        AddParameter(cmd, "id", id);
+
+        RecordData? existingRecord = null;
+        await using (var reader = await cmd.ExecuteReaderAsync(cancellationToken))
+        {
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                existingRecord = ReadRecord(reader, objectDef);
+            }
+        }
+
+        if (existingRecord is null)
+        {
+            throw new RecordNotFoundException(objectDef.Id, id);
+        }
+
+        var mergedFields = new Dictionary<string, object?>(existingRecord.Fields, StringComparer.OrdinalIgnoreCase);
+        foreach (var field in objectDef.Fields)
+        {
+            if (TryGetFieldInput(updateFields, field, objectDef.OwnerApp, out var newVal))
+            {
+                var exposedName = GetExposedFieldName(field, objectDef.OwnerApp);
+                mergedFields[field.Name] = newVal;
+                mergedFields[exposedName] = newVal;
+            }
+        }
+
+        foreach (var field in objectDef.Fields)
+        {
+            if (field.ReadOnlyWhen is not null
+                && TryGetFieldInput(updateFields, field, objectDef.OwnerApp, out _)
+                && WhenRuleEvaluator.Evaluate(field.ReadOnlyWhen, existingRecord.Fields))
+            {
+                throw new RecordValidationException(
+                    $"Field '{field.Name}' on '{objectDef.Id}' is read-only under the current conditions.",
+                    field.Name);
+            }
+
+            if (field.RequiredWhen is not null
+                && WhenRuleEvaluator.Evaluate(field.RequiredWhen, mergedFields))
+            {
+                var exposedName = GetExposedFieldName(field, objectDef.OwnerApp);
+                var hasMerged = mergedFields.TryGetValue(exposedName, out var finalVal)
+                    || mergedFields.TryGetValue(field.Name, out finalVal);
+                if (!hasMerged || WhenRuleEvaluator.IsValueEmpty(finalVal))
+                {
+                    throw new RecordValidationException(
+                        $"Field '{field.Name}' on '{objectDef.Id}' is required under the current conditions.",
+                        field.Name);
+                }
+            }
+        }
+    }
+
+    private static void ValidateNumericRange(FieldDefinition field, decimal value)
+    {
+        if (field.MinValue.HasValue && value < field.MinValue.Value)
+        {
+            throw new RecordValidationException(
+                $"Field '{field.Name}' must be at least {field.MinValue.Value.ToString(CultureInfo.InvariantCulture)}.",
+                field.Name);
+        }
+
+        if (field.MaxValue.HasValue && value > field.MaxValue.Value)
+        {
+            throw new RecordValidationException(
+                $"Field '{field.Name}' must be at most {field.MaxValue.Value.ToString(CultureInfo.InvariantCulture)}.",
+                field.Name);
+        }
+    }
+
+    private static void ValidatePattern(FieldDefinition field, string value)
+    {
+        if (!string.IsNullOrWhiteSpace(field.Pattern) && !string.IsNullOrEmpty(value))
+        {
+            if (!Regex.IsMatch(value, field.Pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(250)))
+            {
+                throw new RecordValidationException(
+                    $"Field '{field.Name}' does not match required pattern '{field.Pattern}'.",
+                    field.Name);
             }
         }
     }
