@@ -22,6 +22,7 @@ public sealed class CoreDbContext(
     public DbSet<Currency> Currencies => Set<Currency>();
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<MetadataItem> MetadataItems => Set<MetadataItem>();
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -37,6 +38,7 @@ public sealed class CoreDbContext(
         ConfigureCurrency(modelBuilder.Entity<Currency>());
         ConfigureCompany(modelBuilder.Entity<Company>());
         ConfigureUser(modelBuilder.Entity<User>());
+        ConfigureMetadataItem(modelBuilder.Entity<MetadataItem>());
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -354,5 +356,36 @@ public sealed class CoreDbContext(
         builder.HasIndex(e => new { e.TenantId, e.ExternalSubject }).IsUnique();
         builder.HasIndex(e => new { e.TenantId, e.Email }).IsUnique();
     }
-}
 
+    private static void ConfigureMetadataItem(EntityTypeBuilder<MetadataItem> builder)
+    {
+        ConfigureEntityBase(builder, "metadata_item");
+
+        builder.Property(e => e.Kind)
+            .HasColumnName("kind")
+            .HasMaxLength(50)
+            .IsRequired();
+
+        builder.Property(e => e.ItemId)
+            .HasColumnName("item_id")
+            .HasMaxLength(200)
+            .IsRequired();
+
+        builder.Property(e => e.OwnerApp)
+            .HasColumnName("owner_app")
+            .HasMaxLength(100)
+            .IsRequired();
+
+        builder.Property(e => e.Version)
+            .HasColumnName("version")
+            .HasMaxLength(50)
+            .IsRequired();
+
+        builder.Property(e => e.DefinitionJson)
+            .HasColumnName("definition_json")
+            .HasColumnType("jsonb")
+            .IsRequired();
+
+        builder.HasIndex(e => new { e.TenantId, e.Kind, e.ItemId }).IsUnique();
+    }
+}

@@ -5,7 +5,7 @@ namespace Erp.Core.Domain.Entities;
 /// </summary>
 public abstract class EntityBase
 {
-    public Guid Id { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
     public Guid TenantId { get; set; }
     public Guid? CompanyId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
@@ -14,4 +14,3 @@ public abstract class EntityBase
     public Guid UpdatedBy { get; set; }
     public long RowVersion { get; set; } = 1;
 }
-
