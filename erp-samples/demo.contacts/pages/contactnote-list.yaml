@@ -1,0 +1,9 @@
+id: demo.contactnote-list
+type: list
+object: demo.contactnote
+title: contacts.list.title
+columns:
+  - party
+  - followUp
+  - text
+

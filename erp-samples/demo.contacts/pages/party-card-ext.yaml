@@ -1,0 +1,14 @@
+extend: core.party-card
+tabs:
+  - label: contacts.tabs.contactNotes
+    list:
+      object: demo.contactnote
+      filter:
+        party: "{id}"
+      fields:
+        - followUp
+        - text
+fields:
+  - after: core.party.email
+    field: demo.contacts.preferredChannel
+

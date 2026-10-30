@@ -171,15 +171,37 @@ public sealed class AppInstallationService(
             .Where(m => m.Kind == "object" && m.OwnerApp != appId)
             .ToListAsync(cancellationToken);
 
+        var now = DateTimeOffset.UtcNow;
         foreach (var objItem in otherObjectItems)
         {
             var objDef = JsonSerializer.Deserialize<ObjectDefinition>(objItem.DefinitionJson, JsonOptions);
             if (objDef is not null)
             {
-                var removedCount = objDef.Fields.RemoveAll(
-                    f => string.Equals(f.OwnerApp, appId, StringComparison.OrdinalIgnoreCase));
-                if (removedCount > 0)
+                var removedFields = objDef.Fields
+                    .Where(f => string.Equals(f.OwnerApp, appId, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (removedFields.Count > 0)
                 {
+                    foreach (var rf in removedFields)
+                    {
+                        var colName = rf.GetColumnName(objDef.OwnerApp);
+                        objDef.OrphanedColumns.RemoveAll(o =>
+                            string.Equals(o.ColumnName, colName, StringComparison.OrdinalIgnoreCase));
+
+                        objDef.OrphanedColumns.Add(new OrphanedColumnDefinition
+                        {
+                            ColumnName = colName,
+                            FieldName = rf.Name,
+                            FormerOwnerApp = appId,
+                            Type = rf.Type,
+                            OrphanedAt = now,
+                            DropAfter = now.AddDays(30)
+                        });
+                    }
+
+                    objDef.Fields.RemoveAll(
+                        f => string.Equals(f.OwnerApp, appId, StringComparison.OrdinalIgnoreCase));
                     objItem.DefinitionJson = JsonSerializer.Serialize(objDef, JsonOptions);
                 }
             }

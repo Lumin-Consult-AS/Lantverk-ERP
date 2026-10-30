@@ -31,6 +31,20 @@ public sealed class StatusTransitionDefinition
 }
 
 /// <summary>
+/// Tracks a database column that belonged to an uninstalled extension app and is retained
+/// during a grace period before physical removal.
+/// </summary>
+public sealed class OrphanedColumnDefinition
+{
+    public string ColumnName { get; set; } = string.Empty;
+    public string FieldName { get; set; } = string.Empty;
+    public string FormerOwnerApp { get; set; } = string.Empty;
+    public FieldType Type { get; set; } = FieldType.String;
+    public DateTimeOffset OrphanedAt { get; set; }
+    public DateTimeOffset DropAfter { get; set; }
+}
+
+/// <summary>
 /// Metadata definition for an object (<c>app.object</c>), owned by a single app.
 /// </summary>
 public sealed class ObjectDefinition
@@ -44,6 +58,7 @@ public sealed class ObjectDefinition
     public List<FieldDefinition> Fields { get; set; } = [];
     public List<UniqueKeyDefinition> Keys { get; set; } = [];
     public ObjectStatusMachineDefinition? Status { get; set; }
+    public List<OrphanedColumnDefinition> OrphanedColumns { get; set; } = [];
 
     public (string Schema, string Table) GetSchemaAndTable() => IdentifierNaming.SplitObjectId(Id);
 

@@ -1,0 +1,13 @@
+id: demo.contactnote-card
+type: card
+object: demo.contactnote
+title: "{party} – {followUp}"
+groups:
+  - label: contacts.card.general
+    fields:
+      - party
+      - followUp
+  - label: contacts.card.note
+    fields:
+      - text
+
