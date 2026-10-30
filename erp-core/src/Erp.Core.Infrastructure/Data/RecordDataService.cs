@@ -8,6 +8,7 @@ using Erp.Core.Domain.Data;
 using Erp.Core.Domain.Metadata;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Apps;
+using Erp.Core.Infrastructure.Events;
 using Erp.Core.Infrastructure.Metadata;
 using Erp.Core.Infrastructure.Persistence;
 using Erp.Sdk.Contracts.V1;
@@ -28,7 +29,8 @@ public sealed class RecordDataService(
     MetadataRegistryService metadataRegistry,
     ITenantContext tenantContext,
     AppHostService? appHostService = null,
-    ActiveCallTransactionRegistry? activeTxRegistry = null)
+    ActiveCallTransactionRegistry? activeTxRegistry = null,
+    EventPublisher? eventPublisher = null)
 {
     public async Task<RecordData?> GetAsync(
         string objectId,
@@ -291,19 +293,13 @@ public sealed class RecordDataService(
                     cancellationToken);
             }
 
+            await PublishRecordEventAsync(
+                conn, tx, $"{objectDef.Id}.created@1", objectDef.Id, saved.Id, saved.Fields, effectiveCompanyId, correlationId, cancellationToken);
+
             return saved;
         }, cancellationToken, correlationId);
 
-        if (appHostService is not null)
-        {
-            await appHostService.DeliverEventToSubscribersAsync(
-                $"{objectDef.Id}.created@1",
-                BuildRecordEventPayload(objectDef.Id, createdRecord.Id, createdRecord.Fields),
-                effectiveCompanyId,
-                correlationId,
-                cancellationToken: cancellationToken);
-        }
-
+        eventPublisher?.NotifyCommitted();
         return createdRecord;
     }
 
@@ -439,6 +435,9 @@ public sealed class RecordDataService(
                         cancellationToken);
                 }
 
+                await PublishRecordEventAsync(
+                    conn, tx, $"{objectDef.Id}.updated@1", objectDef.Id, saved.Id, saved.Fields, companyId, correlationId, cancellationToken);
+
                 return saved;
             }
 
@@ -447,16 +446,7 @@ public sealed class RecordDataService(
             throw new RecordNotFoundException(objectDef.Id, id);
         }, cancellationToken, correlationId);
 
-        if (appHostService is not null)
-        {
-            await appHostService.DeliverEventToSubscribersAsync(
-                $"{objectDef.Id}.updated@1",
-                BuildRecordEventPayload(objectDef.Id, updatedRecord.Id, updatedRecord.Fields),
-                companyId,
-                correlationId,
-                cancellationToken: cancellationToken);
-        }
-
+        eventPublisher?.NotifyCommitted();
         return updatedRecord;
     }
 
@@ -617,18 +607,13 @@ public sealed class RecordDataService(
                     cancellationToken);
             }
 
+            await PublishRecordEventAsync(
+                conn, tx, $"{objectDef.Id}.deleted@1", objectDef.Id, id, null, companyId, correlationId, cancellationToken);
+
             return null;
         }, cancellationToken, correlationId);
 
-        if (appHostService is not null)
-        {
-            await appHostService.DeliverEventToSubscribersAsync(
-                $"{objectDef.Id}.deleted@1",
-                BuildRecordEventPayload(objectDef.Id, id, null),
-                companyId,
-                correlationId,
-                cancellationToken: cancellationToken);
-        }
+        eventPublisher?.NotifyCommitted();
     }
 
     public async Task<int> DeleteWhereAsync(
@@ -1429,6 +1414,31 @@ public sealed class RecordDataService(
                 await connection.CloseAsync();
             }
         }
+    }
+
+    private Task PublishRecordEventAsync(
+        DbConnection conn,
+        DbTransaction? tx,
+        string eventName,
+        string objectId,
+        Guid recordId,
+        IDictionary<string, object?>? fields,
+        Guid? companyId,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        // Written in the same transaction as the data change (transactional outbox, ADR-0009).
+        return eventPublisher is null
+            ? Task.CompletedTask
+            : eventPublisher.PublishAsync(
+                conn,
+                tx,
+                eventName,
+                recordId.ToString("D"),
+                BuildRecordEventPayload(objectId, recordId, fields),
+                companyId,
+                correlationId,
+                cancellationToken);
     }
 
     private static Dictionary<string, object?> BuildRecordEventPayload(

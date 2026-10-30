@@ -39,7 +39,7 @@ public sealed class AppHostService(
 {
     private readonly AppHostOptions _options = options ?? new AppHostOptions();
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    internal static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
@@ -148,89 +148,57 @@ public sealed class AppHostService(
         }
     }
 
-    public async Task<int> DeliverEventToSubscribersAsync(
-        string eventSpec,
-        object payload,
-        Guid? companyId = null,
-        string? correlationId = null,
-        string? eventId = null,
+    /// <summary>
+    /// Delivers one event to one handler of one app over gRPC. Throws when the app is unreachable or does not
+    /// acknowledge, so that the event delivery worker can retry with backoff (ADR-0009). Must be called with the
+    /// tenant (and user) context of the event active.
+    /// </summary>
+    public async Task DeliverEventToHandlerAsync(
+        string appId,
+        string handlerName,
+        string eventId,
+        string eventName,
+        string payloadJson,
+        Guid? companyId,
+        string correlationId,
         CancellationToken cancellationToken = default)
     {
-        var tenantId = tenantContext.TenantId;
-        if (!tenantId.HasValue)
-        {
-            return 0;
-        }
+        var tenantId = tenantContext.TenantId
+            ?? throw new InvalidOperationException("Cannot deliver an event without an active tenant context.");
 
-        var installedApps = await dbContext.InstalledApps
+        var app = await dbContext.InstalledApps
             .AsNoTracking()
-            .OrderBy(a => a.CreatedAt)
-            .ToListAsync(cancellationToken);
+            .FirstOrDefaultAsync(a => a.AppId == appId, cancellationToken)
+            ?? throw new InvalidOperationException($"App '{appId}' is not installed in this tenant.");
 
-        var effectiveEventId = string.IsNullOrWhiteSpace(eventId) ? Guid.NewGuid().ToString("D") : eventId;
-        var effectiveCorrelationId = string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString("D") : correlationId;
-        var payloadJson = payload is string rawJson ? rawJson : JsonSerializer.Serialize(payload, JsonOptions);
-        var deliveredCount = 0;
+        var endpoint = orchestrator.ResolveEndpoint(app.AppId, app.Version)
+            ?? throw new InvalidOperationException($"No running container endpoint registered for app '{app.AppId}@{app.Version}'.");
 
-        foreach (var app in installedApps)
+        using var channel = CreateChannel(endpoint);
+        var client = new AppService.AppServiceClient(channel);
+
+        var headers = new Grpc.Core.Metadata();
+        if (!string.IsNullOrWhiteSpace(_options.CoreCallbackEndpoint))
         {
-            var endpoint = orchestrator.ResolveEndpoint(app.AppId, app.Version);
-            if (endpoint is null)
-            {
-                continue;
-            }
-
-            var manifest = JsonSerializer.Deserialize<AppManifest>(app.ManifestJson, JsonOptions);
-            var matchingSubscriptions = manifest?.SubscribedEvents
-                .Where(s => MatchesEventSpec(s, eventSpec))
-                .ToList() ?? [];
-
-            // Even if the manifest didn't list a specific handler name or if it matches by eventSpec,
-            // deliver to each subscribed handler (or once with empty handler name if endpoint is registered for dynamic OnEvent).
-            if (matchingSubscriptions.Count == 0)
-            {
-                continue;
-            }
-
-            foreach (var sub in matchingSubscriptions)
-            {
-                try
-                {
-                    var callContext = CreateCallContextProto(tenantId.Value, companyId, effectiveCorrelationId);
-                    using var channel = CreateChannel(endpoint);
-                    var client = new AppService.AppServiceClient(channel);
-
-                    var headers = new Grpc.Core.Metadata();
-                    if (!string.IsNullOrWhiteSpace(_options.CoreCallbackEndpoint))
-                    {
-                        headers.Add("x-erp-core-endpoint", _options.CoreCallbackEndpoint);
-                    }
-
-                    var res = await client.DeliverEventAsync(
-                        new EventDeliveryRequest
-                        {
-                            Context = callContext,
-                            EventId = effectiveEventId,
-                            EventName = eventSpec,
-                            HandlerName = sub.Handler ?? string.Empty,
-                            PayloadJson = payloadJson
-                        },
-                        headers: headers,
-                        cancellationToken: cancellationToken);
-
-                    if (res.Acknowledged)
-                    {
-                        deliveredCount++;
-                    }
-                }
-                catch
-                {
-                    // Architectural Rule 7: Events can never reject a transaction.
-                }
-            }
+            headers.Add("x-erp-core-endpoint", _options.CoreCallbackEndpoint);
         }
 
-        return deliveredCount;
+        var res = await client.DeliverEventAsync(
+            new EventDeliveryRequest
+            {
+                Context = CreateCallContextProto(tenantId, companyId, correlationId),
+                EventId = eventId,
+                EventName = eventName,
+                HandlerName = handlerName,
+                PayloadJson = payloadJson
+            },
+            headers: headers,
+            cancellationToken: cancellationToken);
+
+        if (!res.Acknowledged)
+        {
+            throw new InvalidOperationException($"App '{appId}' did not acknowledge event '{eventName}' (handler '{handlerName}').");
+        }
     }
 
     public async Task<TOutput?> InvokeInterfaceAsync<TOutput>(
@@ -311,7 +279,7 @@ public sealed class AppHostService(
         return GrpcChannel.ForAddress(endpoint.Address, options);
     }
 
-    private static bool MatchesEventSpec(EventSubscriptionDefinition sub, string eventSpec)
+    internal static bool MatchesEventSpec(EventSubscriptionDefinition sub, string eventSpec)
     {
         var fullSub = $"{sub.EventId}@{sub.Version}";
         return string.Equals(fullSub, eventSpec, StringComparison.OrdinalIgnoreCase)
