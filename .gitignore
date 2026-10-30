@@ -1,0 +1,31 @@
+# .NET build artifacts
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+out/
+publish/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# User-specific and environment files
+*.DotSettings.user
+appsettings.Local.json
+.env
+
+# Test results & coverage
+TestResults/
+coverage/
+*.trx
+*.coverage
+
+# OS files
+.DS_Store
+Thumbs.db
