@@ -18,7 +18,8 @@ public sealed class AppInstallationService(
     CoreDbContext dbContext,
     MetadataRegistryService metadataRegistry,
     IAppPackageStorage packageStorage,
-    ITenantContext tenantContext)
+    ITenantContext tenantContext,
+    KubernetesAppOrchestrator? appOrchestrator = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -80,6 +81,12 @@ public sealed class AppInstallationService(
 
         // 5. Provision schemas, tables, columns, indexes, RLS, and audit triggers
         await metadataRegistry.ApplyBundleAsync(manifest.Metadata, cancellationToken);
+
+        // 5b. If the app defines a container runtime, provision/ensure shared Deployment and NetworkPolicy
+        if (!manifest.IsDeclarative && manifest.Runtime is not null)
+        {
+            appOrchestrator?.EnsureContainerRunning(manifest);
+        }
 
         // 6. Upsert InstalledApp record
         var existingApp = await dbContext.InstalledApps

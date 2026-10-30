@@ -72,23 +72,32 @@ public static class MetadataDdlGenerator
                     _ => "ON DELETE RESTRICT"
                 };
 
-                transactional.Add(
-                    $"""
-                    DO $$
-                    BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM pg_constraint WHERE conname = '{fkName}'
-                        ) THEN
-                            ALTER TABLE "{schema}"."{table}"
-                                ADD CONSTRAINT "{fkName}"
-                                FOREIGN KEY ("{colName}")
-                                REFERENCES "{targetSchema}"."{targetTable}" (id)
-                                {onDeleteClause}
-                                NOT VALID;
-                            ALTER TABLE "{schema}"."{table}" VALIDATE CONSTRAINT "{fkName}";
-                        END IF;
-                    END $$;
-                    """);
+                if (string.Equals(schema, targetSchema, StringComparison.OrdinalIgnoreCase))
+                {
+                    transactional.Add(
+                        $"""
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (
+                                SELECT 1 FROM pg_constraint WHERE conname = '{fkName}'
+                            ) THEN
+                                ALTER TABLE "{schema}"."{table}"
+                                    ADD CONSTRAINT "{fkName}"
+                                    FOREIGN KEY ("{colName}")
+                                    REFERENCES "{targetSchema}"."{targetTable}" (id)
+                                    {onDeleteClause}
+                                    NOT VALID;
+                                ALTER TABLE "{schema}"."{table}" VALIDATE CONSTRAINT "{fkName}";
+                            END IF;
+                        END $$;
+                        """);
+                }
+                else
+                {
+                    // Cross-app references across schemas are loosely coupled via domain events (e.g. OnEvent)
+                    transactional.Add(
+                        $"""ALTER TABLE "{schema}"."{table}" DROP CONSTRAINT IF EXISTS "{fkName}";""");
+                }
 
                 concurrentIndexes.Add(
                     $"""CREATE INDEX CONCURRENTLY IF NOT EXISTS "ix_{schema}_{table}_{colName}" ON "{schema}"."{table}" (tenant_id, "{colName}");""");

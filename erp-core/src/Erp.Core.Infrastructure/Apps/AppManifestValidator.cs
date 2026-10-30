@@ -213,7 +213,10 @@ public static class AppManifestValidator
             return false;
         }
 
-        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        // Only treat the entry as an origin when it has an explicit scheme; otherwise "host:443"
+        // would parse as a URI whose scheme is the hostname.
+        if (trimmed.Contains("://", StringComparison.Ordinal)
+            && Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
         {
             if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
             {

@@ -8,6 +8,14 @@ sdk: ">=1.0.0 <2.0.0"
 dependencies:
   core.parties: ">=1.0.0 <2.0.0"
 
+runtime:
+  image: ghcr.io/partner/demo-contacts:1.0.0
+  resources:
+    cpu: 250m
+    memory: 256Mi
+  egress:
+    - api.hubspot.com:443
+
 enums:
   demo.channel: [email, phone, sms]
 
@@ -19,7 +27,6 @@ objects:
         type: reference
         to: core.party
         required: true
-        onDelete: cascade
         label: contacts.fields.party
       text:
         type: text
@@ -40,6 +47,8 @@ extensions:
 events:
   publishes:
     - demo.contactnote.created@1
+  subscribes:
+    - core.party.deleted@1: OnPartyDeleted
 
 pages:
   - pages/contactnote-list.yaml
@@ -53,3 +62,7 @@ permissionSets:
     grants:
       demo.contactnote: [read, create, update, delete]
 
+migrations:
+  - from: 0.9.0
+    to: 1.0.0
+    run: Migrations.V100

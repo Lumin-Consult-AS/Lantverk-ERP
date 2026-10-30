@@ -11,6 +11,9 @@
     <ProjectReference Include="..\..\src\Erp.Core.Infrastructure\Erp.Core.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Erp.Core.Api\Erp.Core.Api.csproj" />
     <ProjectReference Include="..\..\..\erp-client\src\Erp.Client\Erp.Client.csproj" />
+    <ProjectReference Include="..\..\..\erp-sdk\src\Erp.Sdk\Erp.Sdk.csproj" />
+    <ProjectReference Include="..\..\..\erp-sdk\src\Erp.Cli\Erp.Cli.csproj" />
+    <ProjectReference Include="..\..\..\erp-samples\demo.contacts\Demo.Contacts.App.csproj" />
   </ItemGroup>
 
   <ItemGroup>

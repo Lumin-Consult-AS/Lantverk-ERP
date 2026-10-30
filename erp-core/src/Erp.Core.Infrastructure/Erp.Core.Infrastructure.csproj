@@ -5,6 +5,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Erp.Core.Domain\Erp.Core.Domain.csproj" />
+    <ProjectReference Include="..\..\..\erp-sdk\src\Erp.Sdk\Erp.Sdk.csproj" />
   </ItemGroup>
 
   <ItemGroup>

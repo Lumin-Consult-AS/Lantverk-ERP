@@ -1,0 +1,227 @@
+syntax = "proto3";
+
+package erp.sdk.v1;
+
+option csharp_namespace = "Erp.Sdk.Contracts.V1";
+
+// Context carried on every call between Core and an App container.
+message CallContextProto {
+  string tenant_id = 1;
+  string company_id = 2;
+  string user_id = 3;
+  string correlation_id = 4;
+  string access_token = 5;
+  string today_iso = 6;
+}
+
+message ValidationErrorProto {
+  string field = 1;
+  string message = 2;
+}
+
+// ============================================================================
+// Core -> App Service (implemented by the App container)
+// ============================================================================
+
+service AppService {
+  rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
+  rpc InvokeHook (HookRequest) returns (HookResponse);
+  rpc DeliverEvent (EventDeliveryRequest) returns (EventDeliveryResponse);
+  rpc InvokeInterface (InterfaceCallRequest) returns (InterfaceCallResponse);
+  rpc RunMigration (MigrationRunRequest) returns (MigrationRunResponse);
+}
+
+message HealthCheckRequest {
+  string app_id = 1;
+}
+
+message HealthCheckResponse {
+  bool healthy = 1;
+  string version = 2;
+}
+
+enum HookTypeProto {
+  UNSPECIFIED = 0;
+  ON_VALIDATE = 1;
+  ON_BEFORE_SAVE = 2;
+  ON_AFTER_SAVE = 3;
+}
+
+message HookRequest {
+  CallContextProto context = 1;
+  HookTypeProto hook_type = 2;
+  string object_id = 3;
+  string operation = 4; // "create", "update", "delete"
+  string record_id = 5;
+  int64 row_version = 6;
+  string fields_json = 7;
+}
+
+message HookResponse {
+  bool is_valid = 1;
+  repeated ValidationErrorProto errors = 2;
+  string modified_fields_json = 3;
+}
+
+message EventDeliveryRequest {
+  CallContextProto context = 1;
+  string event_id = 2;
+  string event_name = 3; // e.g. "core.party.deleted@1"
+  string handler_name = 4;
+  string payload_json = 5;
+}
+
+message EventDeliveryResponse {
+  bool acknowledged = 1;
+  bool already_processed = 2;
+}
+
+message InterfaceCallRequest {
+  CallContextProto context = 1;
+  string interface_id = 2;
+  string operation_name = 3;
+  string input_json = 4;
+}
+
+message InterfaceCallResponse {
+  string output_json = 1;
+}
+
+message MigrationRunRequest {
+  CallContextProto context = 1;
+  string from_version = 2;
+  string to_version = 3;
+  string migration_class = 4;
+}
+
+message MigrationRunResponse {
+  bool completed = 1;
+  int32 records_processed = 2;
+}
+
+// ============================================================================
+// App -> Core Services (implemented by the Core platform)
+// ============================================================================
+
+service DataService {
+  rpc Get (DataGetRequest) returns (DataRecordResponse);
+  rpc Query (DataQueryRequest) returns (DataQueryResponse);
+  rpc Create (DataCreateRequest) returns (DataRecordResponse);
+  rpc Update (DataUpdateRequest) returns (DataRecordResponse);
+  rpc Delete (DataDeleteRequest) returns (DataDeleteResponse);
+  rpc DeleteWhere (DataDeleteWhereRequest) returns (DataDeleteWhereResponse);
+}
+
+message DataGetRequest {
+  CallContextProto context = 1;
+  string object_id = 2;
+  string record_id = 3;
+}
+
+message DataQueryRequest {
+  CallContextProto context = 1;
+  string object_id = 2;
+  string filter_expression = 3;
+  string order_by = 4;
+  int32 top = 5;
+  int32 skip = 6;
+}
+
+message DataCreateRequest {
+  CallContextProto context = 1;
+  string object_id = 2;
+  string fields_json = 3;
+}
+
+message DataUpdateRequest {
+  CallContextProto context = 1;
+  string object_id = 2;
+  string record_id = 3;
+  int64 row_version = 4;
+  string fields_json = 5;
+}
+
+message DataDeleteRequest {
+  CallContextProto context = 1;
+  string object_id = 2;
+  string record_id = 3;
+  int64 row_version = 4;
+}
+
+message DataDeleteResponse {
+  bool deleted = 1;
+}
+
+message DataDeleteWhereRequest {
+  CallContextProto context = 1;
+  string object_id = 2;
+  string filter_expression = 3;
+}
+
+message DataDeleteWhereResponse {
+  int32 deleted_count = 1;
+}
+
+message DataRecordProto {
+  string id = 1;
+  string tenant_id = 2;
+  string company_id = 3;
+  int64 row_version = 4;
+  string fields_json = 5;
+}
+
+message DataRecordResponse {
+  bool found = 1;
+  DataRecordProto record = 2;
+}
+
+message DataQueryResponse {
+  repeated DataRecordProto records = 1;
+}
+
+service EventService {
+  rpc Publish (PublishEventRequest) returns (PublishEventResponse);
+}
+
+message PublishEventRequest {
+  CallContextProto context = 1;
+  string event_name = 2;
+  string aggregate_id = 3;
+  string payload_json = 4;
+}
+
+message PublishEventResponse {
+  string event_id = 1;
+}
+
+service WorkflowService {
+  rpc StartWorkflow (StartWorkflowRequest) returns (StartWorkflowResponse);
+}
+
+message StartWorkflowRequest {
+  CallContextProto context = 1;
+  string workflow_id = 2;
+  string object_id = 3;
+  string record_id = 4;
+}
+
+message StartWorkflowResponse {
+  string workflow_instance_id = 1;
+}
+
+service DocumentService {
+  rpc GetDocument (GetDocumentRequest) returns (GetDocumentResponse);
+}
+
+message GetDocumentRequest {
+  CallContextProto context = 1;
+  string file_id = 2;
+}
+
+message GetDocumentResponse {
+  bool found = 1;
+  string file_name = 2;
+  string content_type = 3;
+  bytes content = 4;
+  string sha256 = 5;
+}

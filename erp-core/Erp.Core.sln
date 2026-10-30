@@ -17,6 +17,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Erp.Core.Tests", "tests\Erp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Erp.Client", "..\erp-client\src\Erp.Client\Erp.Client.csproj", "{0369DA52-43A9-470C-A041-A0D728E798C3}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Erp.Sdk", "..\erp-sdk\src\Erp.Sdk\Erp.Sdk.csproj", "{9AB5529C-3382-467C-B147-BD9DC1997F36}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Erp.Cli", "..\erp-sdk\src\Erp.Cli\Erp.Cli.csproj", "{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Demo.Contacts.App", "..\erp-samples\demo.contacts\Demo.Contacts.App.csproj", "{561D42B0-0263-42C4-9C71-B6153D23BB11}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -87,6 +93,42 @@ Global
 		{0369DA52-43A9-470C-A041-A0D728E798C3}.Release|x64.Build.0 = Release|Any CPU
 		{0369DA52-43A9-470C-A041-A0D728E798C3}.Release|x86.ActiveCfg = Release|Any CPU
 		{0369DA52-43A9-470C-A041-A0D728E798C3}.Release|x86.Build.0 = Release|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Debug|x64.Build.0 = Debug|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Debug|x86.Build.0 = Debug|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Release|x64.ActiveCfg = Release|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Release|x64.Build.0 = Release|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Release|x86.ActiveCfg = Release|Any CPU
+		{9AB5529C-3382-467C-B147-BD9DC1997F36}.Release|x86.Build.0 = Release|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Debug|x64.Build.0 = Debug|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Debug|x86.Build.0 = Debug|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Release|Any CPU.Build.0 = Release|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Release|x64.ActiveCfg = Release|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Release|x64.Build.0 = Release|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Release|x86.ActiveCfg = Release|Any CPU
+		{92CA36CD-81AD-4B1F-A282-16BB9BBD4C57}.Release|x86.Build.0 = Release|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Debug|x64.Build.0 = Debug|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Debug|x86.Build.0 = Debug|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Release|Any CPU.Build.0 = Release|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Release|x64.ActiveCfg = Release|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Release|x64.Build.0 = Release|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Release|x86.ActiveCfg = Release|Any CPU
+		{561D42B0-0263-42C4-9C71-B6153D23BB11}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

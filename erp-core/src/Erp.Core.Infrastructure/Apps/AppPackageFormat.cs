@@ -44,7 +44,8 @@ public static class AppPackageFormat
         foreach (var filePath in Directory.EnumerateFiles(directoryPath, "*", SearchOption.AllDirectories))
         {
             var relPath = Path.GetRelativePath(directoryPath, filePath).Replace('\\', '/');
-            if (string.Equals(relPath, SignatureEntryName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(relPath, SignatureEntryName, StringComparison.OrdinalIgnoreCase)
+                || !IsPackageContent(relPath))
             {
                 continue;
             }
@@ -53,6 +54,23 @@ public static class AppPackageFormat
         }
 
         return CreateSignedZipFromFiles(files, signingKey, publisher);
+    }
+
+    /// <summary>
+    /// Packages contain only declarative YAML. Container apps keep their source and build output
+    /// (<c>bin/</c>, <c>obj/</c>, <c>*.cs</c>, Dockerfile) next to the manifest; those are not package content.
+    /// </summary>
+    private static bool IsPackageContent(string relPath)
+    {
+        var firstSegment = relPath.Split('/', 2)[0];
+        if (firstSegment is "bin" or "obj")
+        {
+            return false;
+        }
+
+        var ext = Path.GetExtension(relPath);
+        return ext.Equals(".yaml", StringComparison.OrdinalIgnoreCase)
+               || ext.Equals(".yml", StringComparison.OrdinalIgnoreCase);
     }
 
     public static byte[] CreateSignedZipFromFiles(

@@ -162,6 +162,9 @@ public static class AppManagementEndpoints
             }
         });
 
+        v1.MapGet("/apps/containers", (KubernetesAppOrchestrator orchestrator) =>
+            Results.Ok(orchestrator.GetAllDeployments()));
+
         v1.MapGet("/metadata/pages", async (AppInstallationService appService, CancellationToken ct) =>
             Results.Ok(await appService.GetEffectivePagesAsync(ct)));
 

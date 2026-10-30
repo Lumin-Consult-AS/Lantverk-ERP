@@ -30,9 +30,105 @@ public sealed record TokenExchangeResponse(
 public sealed class InternalTokenService(
     CoreDbContext dbContext,
     ITenantContext tenantContext,
-    IOptions<AuthOptions> authOptions)
+    IOptions<AuthOptions> authOptions) : IInternalTokenIssuer
 {
     private readonly AuthOptions _options = authOptions.Value;
+
+    public string IssueShortLivedCallToken(
+        Guid tenantId,
+        Guid userId,
+        Guid? companyId = null,
+        IReadOnlyList<string>? roles = null,
+        TimeSpan? lifetime = null)
+    {
+        var now = DateTime.UtcNow;
+        var expires = now.Add(lifetime ?? TimeSpan.FromMinutes(2));
+
+        var claims = new List<Claim>
+        {
+            new(JwtRegisteredClaimNames.Sub, userId.ToString("D")),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("D")),
+            new("tenant_id", tenantId.ToString("D")),
+            new("token_use", "internal")
+        };
+
+        if (companyId.HasValue)
+        {
+            claims.Add(new Claim("company_id", companyId.Value.ToString("D")));
+        }
+
+        if (roles is not null)
+        {
+            foreach (var role in roles)
+            {
+                claims.Add(new Claim(ClaimTypes.Role, role));
+                claims.Add(new Claim("role", role));
+            }
+        }
+
+        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.InternalSigningKey));
+        var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
+
+        var jwt = new JwtSecurityToken(
+            issuer: _options.InternalIssuer,
+            audience: _options.InternalAudience,
+            claims: claims,
+            notBefore: now,
+            expires: expires,
+            signingCredentials: credentials);
+
+        return new JwtSecurityTokenHandler().WriteToken(jwt);
+    }
+
+    public ValidatedInternalToken? ValidateToken(string accessToken)
+    {
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return null;
+        }
+
+        try
+        {
+            var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
+            var keyBytes = Encoding.UTF8.GetBytes(_options.InternalSigningKey);
+            var principal = handler.ValidateToken(
+                accessToken,
+                new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidIssuer = _options.InternalIssuer,
+                    ValidateAudience = true,
+                    ValidAudience = _options.InternalAudience,
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.FromSeconds(15),
+                    NameClaimType = "sub",
+                    RoleClaimType = "role"
+                },
+                out _);
+
+            if (!string.Equals(principal.FindFirstValue("token_use"), "internal", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            if (!Guid.TryParse(principal.FindFirstValue("tenant_id"), out var tenantId)
+                || !Guid.TryParse(principal.FindFirstValue("sub"), out var userId))
+            {
+                return null;
+            }
+
+            Guid? companyId = Guid.TryParse(principal.FindFirstValue("company_id"), out var cid) ? cid : null;
+            var roles = principal.FindAll("role").Select(c => c.Value).Distinct().ToList();
+
+            return new ValidatedInternalToken(tenantId, userId, companyId, roles, principal);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     public async Task<TokenExchangeResponse?> ExchangeTokenAsync(
         ClaimsPrincipal externalPrincipal,
@@ -166,4 +262,3 @@ public sealed class InternalTokenService(
             Roles: user.Roles);
     }
 }
-
