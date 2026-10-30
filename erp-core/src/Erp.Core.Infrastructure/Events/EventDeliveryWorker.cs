@@ -126,8 +126,9 @@ public sealed class EventDeliveryWorker(
             return;
         }
 
-        // Act as the user that triggered the event so the short-lived call token carries the right identity.
-        tenantContext.Set(tenantId, delivery.UserId, delivery.CompanyId);
+        // Act as the user that triggered the event, with that user's current roles, so the short-lived call token
+        // carries the right identity and the app's callbacks are limited to what the user may do.
+        tenantContext.Set(tenantId, delivery.UserId, delivery.CompanyId, await LoadRolesAsync(connection, delivery.UserId, cancellationToken));
         await TenantDb.OpenAsync(dbContext, tenantContext, cancellationToken);
 
         try
@@ -251,6 +252,14 @@ public sealed class EventDeliveryWorker(
             reader.GetGuid(9),
             EventLogService.BuildEnvelopeJson(
                 eventId, eventName, tenantId, companyId, reader.GetGuid(9), correlationId, occurredAt, reader.GetString(12), payloadJson));
+    }
+
+    private static async Task<string[]> LoadRolesAsync(DbConnection connection, Guid userId, CancellationToken cancellationToken)
+    {
+        await using var cmd = TenantDb.Create(
+            connection, null, """SELECT roles FROM core."user" WHERE id = @id AND is_active;""");
+        TenantDb.Add(cmd, "id", NpgsqlDbType.Uuid, userId);
+        return await cmd.ExecuteScalarAsync(cancellationToken) as string[] ?? [];
     }
 
     private async Task MarkDeliveredAsync(DbConnection connection, Guid deliveryId, CancellationToken cancellationToken)

@@ -16,3 +16,5 @@ public sealed class RecordNotFoundException(string objectId, Guid id)
 public sealed class ConcurrencyConflictException(string objectId, Guid id, long expectedRowVersion)
     : Exception($"Optimistic concurrency conflict on '{objectId}' record '{id}' (expected row_version {expectedRowVersion}).");
 
+/// <summary>The caller's roles do not grant the permission required for the operation.</summary>
+public sealed class PermissionDeniedException(string message) : Exception(message);

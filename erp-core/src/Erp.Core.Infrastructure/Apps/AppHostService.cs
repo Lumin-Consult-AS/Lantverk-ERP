@@ -255,7 +255,8 @@ public sealed class AppHostService(
             tenantId,
             userId,
             effectiveCompanyId,
-            lifetime: TimeSpan.FromMinutes(2)) ?? string.Empty;
+            tenantContext.Roles,
+            TimeSpan.FromMinutes(2)) ?? string.Empty;
 
         return new CallContextProto
         {

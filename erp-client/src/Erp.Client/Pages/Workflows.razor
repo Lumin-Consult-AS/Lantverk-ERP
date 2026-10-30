@@ -1,0 +1,227 @@
+@page "/workflows"
+@inject ErpApiClient Api
+@inject I18nService I18n
+@implements IDisposable
+
+<MudGrid>
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="2" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-2">@I18n.T("ui.workflows.title")</MudText>
+            <MudList T="string" Dense="true">
+                @foreach (var entry in _workflows)
+                {
+                    <MudListItem T="string" OnClick="@(() => Select(entry))" data-workflow-id="@entry.Definition.Id">
+                        <div>
+                            <b>@entry.Definition.Id</b><br />
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                @(entry.IsCustomized ? I18n.T("ui.workflows.customized") : I18n.T("ui.workflows.default"))
+                            </MudText>
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="8">
+        @if (_message is not null)
+        {
+            <MudAlert Severity="@(_isError ? Severity.Error : Severity.Success)" Class="mb-3">@_message</MudAlert>
+        }
+
+        @if (_edit is not null)
+        {
+            <MudPaper Elevation="2" Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-3">@_edit.Id</MudText>
+
+                <MudGrid>
+                    <MudItem xs="12" sm="6">
+                        <MudSelect T="string" Label="@I18n.T("ui.workflows.mode")" @bind-Value="_edit.Mode" Variant="Variant.Outlined">
+                            <MudSelectItem T="string" Value="@("sequential")">@I18n.T("ui.workflows.sequential")</MudSelectItem>
+                            <MudSelectItem T="string" Value="@("parallel")">@I18n.T("ui.workflows.parallel")</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudCheckBox T="bool" Label="@I18n.T("ui.workflows.delegation")"
+                                     Value="@(_edit.Delegation == "allowed")"
+                                     ValueChanged="@(v => _edit.Delegation = v ? "allowed" : "none")" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudNumericField T="int" Label="@I18n.T("ui.workflows.deadlineDays")" Variant="Variant.Outlined"
+                                         Min="0" Value="@(_edit.Deadline?.Days ?? 0)" ValueChanged="@SetDeadlineDays" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField T="string" Label="@I18n.T("ui.workflows.escalateRole")" Variant="Variant.Outlined"
+                                      Disabled="@(_edit.Deadline is null)"
+                                      Value="@(_edit.Deadline?.EscalateTo?.Role)" ValueChanged="@SetEscalateRole" />
+                    </MudItem>
+                </MudGrid>
+
+                <MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">@I18n.T("ui.workflows.steps")</MudText>
+                @for (var i = 0; i < _edit.Steps.Count; i++)
+                {
+                    var step = _edit.Steps[i];
+                    var index = i;
+                    <MudPaper Outlined="true" Class="pa-3 mb-2">
+                        <MudGrid>
+                            <MudItem xs="12" sm="4">
+                                <MudTextField T="string" Label="@I18n.T("ui.workflows.stepName")" @bind-Value="step.Name" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudTextField T="string" Label="@I18n.T("ui.workflows.assigneeRole")" @bind-Value="step.Assignee.Role" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudSelect T="Guid?" Label="@I18n.T("ui.workflows.assigneeUser")" Variant="Variant.Outlined" Clearable="true"
+                                           @bind-Value="step.Assignee.User">
+                                    @foreach (var user in _users)
+                                    {
+                                        <MudSelectItem T="Guid?" Value="@((Guid?)user.Id)">@(string.IsNullOrWhiteSpace(user.DisplayName) ? user.Email : user.DisplayName)</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            @if (step.When is { IsGroup: true })
+                            {
+                                <MudItem xs="12">
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@I18n.T("ui.workflows.compoundRule")</MudText>
+                                </MudItem>
+                            }
+                            else
+                            {
+                                <MudItem xs="12" sm="4">
+                                    <MudTextField T="string" Label="@I18n.T("ui.workflows.whenField")" Variant="Variant.Outlined"
+                                                  Value="@(step.When?.Field)" ValueChanged="@(v => EnsureRule(step).Field = v)" />
+                                </MudItem>
+                                <MudItem xs="12" sm="4">
+                                    <MudSelect T="string" Label="@I18n.T("ui.workflows.whenOperator")" Variant="Variant.Outlined"
+                                               Value="@(step.When?.Operator ?? "gt")" ValueChanged="@(v => EnsureRule(step).Operator = v)">
+                                        @foreach (var op in Operators)
+                                        {
+                                            <MudSelectItem T="string" Value="@op">@op</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12" sm="4">
+                                    <MudTextField T="string" Label="@I18n.T("ui.workflows.whenValue")" Variant="Variant.Outlined"
+                                                  Value="@(step.When?.ValueText)" ValueChanged="@(v => EnsureRule(step).ValueText = v ?? string.Empty)" />
+                                </MudItem>
+                            }
+
+                            <MudItem xs="12">
+                                <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text"
+                                           OnClick="@(() => _edit.Steps.RemoveAt(index))">@I18n.T("ui.workflows.removeStep")</MudButton>
+                            </MudItem>
+                        </MudGrid>
+                    </MudPaper>
+                }
+
+                <div class="d-flex gap-2 mt-3">
+                    <MudButton Variant="Variant.Outlined" OnClick="AddStep">@I18n.T("ui.workflows.addStep")</MudButton>
+                    <MudSpacer />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="SaveAsync" data-action="save-workflow">
+                        @I18n.T("ui.action.save")
+                    </MudButton>
+                </div>
+            </MudPaper>
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    private static readonly string[] Operators = ["eq", "ne", "gt", "ge", "lt", "le", "in", "contains", "isEmpty"];
+
+    private IReadOnlyList<ClientWorkflowEntry> _workflows = [];
+    private IReadOnlyList<ClientUserSummary> _users = [];
+    private ClientWorkflowDefinition? _edit;
+    private string? _message;
+    private bool _isError;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        I18n.OnLocaleChanged += StateHasChanged;
+
+        if (Api.CurrentAuth is null)
+        {
+            await Api.DevLoginAsync();
+        }
+
+        try
+        {
+            _workflows = await Api.GetWorkflowsAsync();
+            _users = await Api.GetUsersAsync();
+        }
+        catch (Exception ex)
+        {
+            Fail(ex);
+        }
+    }
+
+    private void Select(ClientWorkflowEntry entry)
+    {
+        _message = null;
+        _edit = entry.Definition;
+    }
+
+    private void AddStep() => _edit?.Steps.Add(new ClientWorkflowStep());
+
+    private static ClientWorkflowRule EnsureRule(ClientWorkflowStep step) =>
+        step.When ??= new ClientWorkflowRule { Operator = "gt" };
+
+    private void SetDeadlineDays(int days)
+    {
+        if (_edit is null)
+        {
+            return;
+        }
+
+        _edit.Deadline = days <= 0 ? null : new ClientWorkflowDeadline { Days = days, EscalateTo = _edit.Deadline?.EscalateTo };
+    }
+
+    private void SetEscalateRole(string? role)
+    {
+        if (_edit?.Deadline is not null)
+        {
+            _edit.Deadline.EscalateTo = string.IsNullOrWhiteSpace(role) ? null : new ClientWorkflowAssignee { Role = role };
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_edit is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            // A step without a field is an unconditional step.
+            foreach (var step in _edit.Steps.Where(s => s.When is { IsGroup: false } && string.IsNullOrWhiteSpace(s.When.Field)))
+            {
+                step.When = null;
+            }
+
+            await Api.SaveWorkflowAsync(_edit);
+            _workflows = await Api.GetWorkflowsAsync();
+            _message = I18n.T("ui.workflows.saved");
+            _isError = false;
+        }
+        catch (Exception ex)
+        {
+            Fail(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Fail(Exception ex)
+    {
+        _message = ex.Message;
+        _isError = true;
+    }
+
+    public void Dispose() => I18n.OnLocaleChanged -= StateHasChanged;
+}

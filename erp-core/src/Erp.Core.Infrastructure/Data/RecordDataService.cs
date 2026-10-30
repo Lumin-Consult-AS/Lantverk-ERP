@@ -11,6 +11,8 @@ using Erp.Core.Infrastructure.Apps;
 using Erp.Core.Infrastructure.Events;
 using Erp.Core.Infrastructure.Metadata;
 using Erp.Core.Infrastructure.Persistence;
+using Erp.Core.Infrastructure.Security;
+using Erp.Core.Infrastructure.Workflow;
 using Erp.Sdk.Contracts.V1;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -30,9 +32,25 @@ public sealed class RecordDataService(
     ITenantContext tenantContext,
     AppHostService? appHostService = null,
     ActiveCallTransactionRegistry? activeTxRegistry = null,
-    EventPublisher? eventPublisher = null)
+    EventPublisher? eventPublisher = null,
+    WorkflowStore? workflowStore = null,
+    WorkflowNotifier? workflowNotifier = null,
+    PermissionService? permissions = null)
 {
     public async Task<RecordData?> GetAsync(
+        string objectId,
+        Guid id,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        await RequirePermissionAsync(objectId, "read", cancellationToken);
+        return await GetCoreAsync(objectId, id, companyId, cancellationToken);
+    }
+
+    private Task RequirePermissionAsync(string objectId, string action, CancellationToken cancellationToken) =>
+        permissions is null ? Task.CompletedTask : permissions.RequireAsync(objectId, action, cancellationToken);
+
+    private async Task<RecordData?> GetCoreAsync(
         string objectId,
         Guid id,
         Guid? companyId = null,
@@ -66,12 +84,47 @@ public sealed class RecordDataService(
         }, cancellationToken);
     }
 
+    public async Task<int> CountAsync(
+        string objectId,
+        FilterNode? filter,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        await RequirePermissionAsync(objectId, "read", cancellationToken);
+        var objectDef = await RequireObjectAsync(objectId, cancellationToken);
+        var (schema, table) = objectDef.GetSchemaAndTable();
+
+        return await ExecuteWithConnectionAsync(async (conn, tx) =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+
+            var whereClauses = new List<string>();
+            if (companyId.HasValue && objectDef.IsCompanyScoped)
+            {
+                whereClauses.Add("(company_id = @companyId OR company_id IS NULL)");
+                AddParameter(cmd, "companyId", companyId.Value);
+            }
+
+            if (filter is not null)
+            {
+                var paramIndex = 0;
+                whereClauses.Add(CompileFilterNode(filter, objectDef, cmd, ref paramIndex));
+            }
+
+            cmd.CommandText =
+                $"""SELECT count(*) FROM "{schema}"."{table}" {(whereClauses.Count > 0 ? "WHERE " + string.Join(" AND ", whereClauses) : string.Empty)};""";
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        }, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<RecordData>> QueryAsync(
         string objectId,
         DataQuery query,
         Guid? companyId = null,
         CancellationToken cancellationToken = default)
     {
+        await RequirePermissionAsync(objectId, "read", cancellationToken);
         var objectDef = await RequireObjectAsync(objectId, cancellationToken);
         var (schema, table) = objectDef.GetSchemaAndTable();
 
@@ -140,6 +193,7 @@ public sealed class RecordDataService(
         Guid? explicitId = null,
         CancellationToken cancellationToken = default)
     {
+        await RequirePermissionAsync(objectId, "create", cancellationToken);
         var objectDef = await RequireObjectAsync(objectId, cancellationToken);
         var (schema, table) = objectDef.GetSchemaAndTable();
 
@@ -311,6 +365,7 @@ public sealed class RecordDataService(
         Guid? companyId = null,
         CancellationToken cancellationToken = default)
     {
+        await RequirePermissionAsync(objectId, "update", cancellationToken);
         var objectDef = await RequireObjectAsync(objectId, cancellationToken);
         var (schema, table) = objectDef.GetSchemaAndTable();
         var userId = tenantContext.UserId ?? tenantContext.TenantId ?? Guid.Empty;
@@ -466,7 +521,10 @@ public sealed class RecordDataService(
                 $"Object '{objectDef.Id}' does not define status transition '{transitionName}'.");
         }
 
-        var existing = await GetAsync(objectId, id, companyId, cancellationToken)
+        await RequirePermissionAsync(
+            objectDef.Id, string.IsNullOrWhiteSpace(transition.Permission) ? "update" : transition.Permission, cancellationToken);
+
+        var existing = await GetCoreAsync(objectId, id, companyId, cancellationToken)
             ?? throw new RecordNotFoundException(objectId, id);
 
         var statusFieldName = string.IsNullOrWhiteSpace(objectDef.Status.Field) ? "status" : objectDef.Status.Field;
@@ -482,48 +540,150 @@ public sealed class RecordDataService(
         }
 
         var rowVer = expectedRowVersion ?? existing.RowVersion;
+        var correlationId = activeTxRegistry?.CurrentCorrelationId ?? Guid.NewGuid().ToString("D");
+        IReadOnlyList<Guid> openedTasks = [];
+
+        var updatedRecord = await ExecuteWithConnectionAsync(async (conn, tx) =>
+        {
+            if (workflowStore is not null
+                && await workflowStore.HasRunningInstanceAsync(conn, tx, objectDef.Id, id, cancellationToken))
+            {
+                throw new RecordValidationException(
+                    $"Record '{id}' on '{objectDef.Id}' is locked by a running workflow; progress it through its workflow tasks.",
+                    statusFieldName);
+            }
+
+            var changed = await ApplyStatusChangeAsync(conn, tx, objectDef, id, rowVer, transition.To, cancellationToken);
+            await PublishRecordEventAsync(
+                conn, tx, $"{objectDef.Id}.updated@1", objectDef.Id, changed.Id, changed.Fields, changed.CompanyId, correlationId, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(transition.Workflow))
+            {
+                if (workflowStore is null)
+                {
+                    throw new RecordValidationException(
+                        $"Transition '{transitionName}' on '{objectDef.Id}' requires workflow '{transition.Workflow}', but workflows are not available.");
+                }
+
+                var start = await workflowStore.StartAsync(
+                    conn, tx, objectDef, changed, transitionName, transition.Workflow, changed.CompanyId, correlationId, cancellationToken);
+                openedTasks = start.OpenedTaskIds;
+
+                if (start.NoStepsApply && !string.IsNullOrWhiteSpace(start.Definition.OnComplete))
+                {
+                    changed = await ApplyWorkflowOutcomeAsync(
+                        conn, tx, objectDef.Id, id, start.Definition.OnComplete, correlationId, cancellationToken);
+                }
+            }
+
+            return changed;
+        }, cancellationToken, correlationId);
+
+        eventPublisher?.NotifyCommitted();
+        if (workflowNotifier is not null && openedTasks.Count > 0)
+        {
+            await workflowNotifier.NotifyTasksAsync(openedTasks, cancellationToken);
+        }
+
+        return updatedRecord;
+    }
+
+    /// <summary>
+    /// Executes a status transition on behalf of the workflow engine, inside the caller's transaction. Bypasses the
+    /// workflow lock (the engine is what releases it) and verifies the record is still in the transition's source status.
+    /// </summary>
+    public async Task<RecordData> ApplyWorkflowOutcomeAsync(
+        DbConnection conn,
+        DbTransaction? tx,
+        string objectId,
+        Guid recordId,
+        string transitionName,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        var objectDef = await RequireObjectAsync(objectId, cancellationToken);
+        if (objectDef.Status is null
+            || !objectDef.Status.Transitions.TryGetValue(transitionName, out var transition))
+        {
+            throw new RecordValidationException($"Object '{objectDef.Id}' does not define status transition '{transitionName}'.");
+        }
+
         var (schema, table) = objectDef.GetSchemaAndTable();
+        RecordData current;
+        await using (var cmd = CreateCommand(conn, tx, $"""SELECT * FROM "{schema}"."{table}" WHERE id = @id FOR UPDATE;"""))
+        {
+            AddParameter(cmd, "id", recordId);
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            current = await reader.ReadAsync(cancellationToken)
+                ? ReadRecord(reader, objectDef)
+                : throw new RecordNotFoundException(objectDef.Id, recordId);
+        }
+
+        var statusFieldName = string.IsNullOrWhiteSpace(objectDef.Status.Field) ? "status" : objectDef.Status.Field;
+        current.Fields.TryGetValue(statusFieldName, out var statusValue);
+        var currentStatus = Convert.ToString(statusValue, CultureInfo.InvariantCulture) ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(transition.From)
+            && !string.Equals(currentStatus, transition.From, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new RecordValidationException(
+                $"Cannot execute transition '{transitionName}' on '{objectDef.Id}' from status '{currentStatus}' (expected '{transition.From}').",
+                statusFieldName);
+        }
+
+        var changed = await ApplyStatusChangeAsync(conn, tx, objectDef, recordId, current.RowVersion, transition.To, cancellationToken);
+        await PublishRecordEventAsync(
+            conn, tx, $"{objectDef.Id}.updated@1", objectDef.Id, changed.Id, changed.Fields, changed.CompanyId, correlationId, cancellationToken);
+        return changed;
+    }
+
+    private async Task<RecordData> ApplyStatusChangeAsync(
+        DbConnection conn,
+        DbTransaction? tx,
+        ObjectDefinition objectDef,
+        Guid id,
+        long rowVersion,
+        string newStatus,
+        CancellationToken cancellationToken)
+    {
+        var (schema, table) = objectDef.GetSchemaAndTable();
+        var statusFieldName = string.IsNullOrWhiteSpace(objectDef.Status?.Field) ? "status" : objectDef.Status!.Field;
         var statusFieldDef = objectDef.Fields.FirstOrDefault(
             f => string.Equals(f.Name, statusFieldName, StringComparison.OrdinalIgnoreCase));
         var statusCol = statusFieldDef?.GetColumnName(objectDef.OwnerApp)
             ?? IdentifierNaming.ToSnakeCase(statusFieldName);
         var userId = tenantContext.UserId ?? tenantContext.TenantId ?? Guid.Empty;
-        var now = DateTimeOffset.UtcNow;
 
-        return await ExecuteWithConnectionAsync(async (conn, tx) =>
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+
+        AddParameter(cmd, "id", id);
+        AddParameter(cmd, "expected_row_version", rowVersion);
+        AddParameter(cmd, "new_status", newStatus);
+        AddParameter(cmd, "updated_at", DateTimeOffset.UtcNow);
+        AddParameter(cmd, "updated_by", userId);
+
+        cmd.CommandText =
+            $"""
+            UPDATE "{schema}"."{table}"
+               SET "{statusCol}" = @new_status,
+                   "updated_at" = @updated_at,
+                   "updated_by" = @updated_by,
+                   "row_version" = "row_version" + 1
+             WHERE id = @id
+               AND row_version = @expected_row_version
+            RETURNING *;
+            """;
+
+        await using (var reader = await cmd.ExecuteReaderAsync(cancellationToken))
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.Transaction = tx;
-
-            AddParameter(cmd, "id", id);
-            AddParameter(cmd, "expected_row_version", rowVer);
-            AddParameter(cmd, "new_status", transition.To);
-            AddParameter(cmd, "updated_at", now);
-            AddParameter(cmd, "updated_by", userId);
-
-            cmd.CommandText =
-                $"""
-                UPDATE "{schema}"."{table}"
-                   SET "{statusCol}" = @new_status,
-                       "updated_at" = @updated_at,
-                       "updated_by" = @updated_by,
-                       "row_version" = "row_version" + 1
-                 WHERE id = @id
-                   AND row_version = @expected_row_version
-                RETURNING *;
-                """;
-
-            await using (var reader = await cmd.ExecuteReaderAsync(cancellationToken))
+            if (await reader.ReadAsync(cancellationToken))
             {
-                if (await reader.ReadAsync(cancellationToken))
-                {
-                    return ReadRecord(reader, objectDef);
-                }
+                return ReadRecord(reader, objectDef);
             }
+        }
 
-            await ThrowNotFoundOrConcurrencyConflictAsync(conn, tx, schema, table, objectDef.Id, id, rowVer, cancellationToken);
-            throw new RecordNotFoundException(objectDef.Id, id);
-        }, cancellationToken);
+        await ThrowNotFoundOrConcurrencyConflictAsync(conn, tx, schema, table, objectDef.Id, id, rowVersion, cancellationToken);
+        throw new RecordNotFoundException(objectDef.Id, id);
     }
 
     public async Task DeleteAsync(
@@ -533,12 +693,20 @@ public sealed class RecordDataService(
         Guid? companyId = null,
         CancellationToken cancellationToken = default)
     {
+        await RequirePermissionAsync(objectId, "delete", cancellationToken);
         var objectDef = await RequireObjectAsync(objectId, cancellationToken);
         var (schema, table) = objectDef.GetSchemaAndTable();
         var correlationId = activeTxRegistry?.CurrentCorrelationId ?? Guid.NewGuid().ToString("D");
 
         await ExecuteWithConnectionAsync<object?>(async (conn, tx) =>
         {
+            if (workflowStore is not null
+                && await workflowStore.HasRunningInstanceAsync(conn, tx, objectDef.Id, id, cancellationToken))
+            {
+                throw new RecordValidationException(
+                    $"Record '{id}' on '{objectDef.Id}' is locked by a running workflow and cannot be deleted.");
+            }
+
             if (appHostService is not null)
             {
                 var emptyFields = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
@@ -724,6 +892,7 @@ public sealed class RecordDataService(
         Guid recordId,
         CancellationToken cancellationToken = default)
     {
+        await RequirePermissionAsync(objectId, "read", cancellationToken);
         var objectDef = await RequireObjectAsync(objectId, cancellationToken);
         var (schema, _) = objectDef.GetSchemaAndTable();
         var auditTable = objectDef.GetAuditTableName();
@@ -1530,6 +1699,19 @@ public sealed class RecordDataService(
                         $"Record '{id}' on '{objectDef.Id}' is locked in status '{curStatus}' and cannot be edited.",
                         statusFieldName);
                 }
+            }
+        }
+
+        if (workflowStore is not null
+            && await workflowStore.HasRunningInstanceAsync(conn, tx, objectDef.Id, id, cancellationToken))
+        {
+            var blocked = objectDef.Fields.FirstOrDefault(
+                f => !f.EditableInWorkflow && TryGetFieldInput(updateFields, f, objectDef.OwnerApp, out _));
+            if (blocked is not null)
+            {
+                throw new RecordValidationException(
+                    $"Record '{id}' on '{objectDef.Id}' is locked by a running workflow; field '{blocked.Name}' cannot be edited.",
+                    blocked.Name);
             }
         }
 

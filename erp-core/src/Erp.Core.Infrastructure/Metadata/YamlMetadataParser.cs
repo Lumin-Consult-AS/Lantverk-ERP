@@ -305,6 +305,7 @@ public static class YamlMetadataParser
                 RequiredWhen = fNode.TryGetValue("requiredWhen", out var reqWhen) ? ParseWhenRule(reqWhen) : null,
                 ReadOnlyWhen = fNode.TryGetValue("readOnlyWhen", out var roWhen) ? ParseWhenRule(roWhen) : null,
                 VisibleWhen = fNode.TryGetValue("visibleWhen", out var visWhen) ? ParseWhenRule(visWhen) : null,
+                EditableInWorkflow = GetBool(fNode, "editableInWorkflow") ?? false,
                 TargetObject = GetString(fNode, "to") ?? GetString(fNode, "targetObject"),
                 OnDelete = onDelete,
                 EnumType = GetString(fNode, "of") ?? GetString(fNode, "enumType")

@@ -1,0 +1,157 @@
+@page "/tasks"
+@page "/tasks/{TaskId:guid}"
+@inject ErpApiClient Api
+@inject I18nService I18n
+@implements IDisposable
+
+<MudPaper Elevation="2" Class="pa-4">
+    <MudText Typo="Typo.h5" Class="mb-3">@I18n.T("ui.tasks.title")</MudText>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-3">@_error</MudAlert>
+    }
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" />
+    }
+    else if (_tasks.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info">@I18n.T("ui.tasks.empty")</MudAlert>
+    }
+    else
+    {
+        @foreach (var task in _tasks)
+        {
+            <MudPaper Outlined="true" Class="pa-3 mb-3" data-task-id="@task.Id">
+                <div class="d-flex flex-wrap align-center justify-space-between gap-2">
+                    <div>
+                        <MudText Typo="Typo.subtitle1"><b>@task.Title</b></MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @if (task.DueAt is not null)
+                            {
+                                <span>@I18n.T("ui.tasks.due"): @task.DueAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                            }
+                            @if (task.Escalated)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ml-2">@I18n.T("ui.tasks.escalated")</MudChip>
+                            }
+                        </MudText>
+                    </div>
+                    @if (TaskId == task.Id)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info">●</MudChip>
+                    }
+                </div>
+
+                <MudTextField T="string"
+                              @bind-Value="_comments[task.Id]"
+                              Label="@I18n.T("ui.tasks.comment")"
+                              Lines="2"
+                              Variant="Variant.Outlined"
+                              Class="mt-2" />
+
+                <div class="d-flex flex-wrap align-center gap-2 mt-2">
+                    <MudButton Color="Color.Success" Variant="Variant.Filled" Size="Size.Small"
+                               Disabled="_busy" OnClick="@(() => ApproveAsync(task))" data-action="approve">
+                        @I18n.T("ui.tasks.approve")
+                    </MudButton>
+                    <MudButton Color="Color.Error" Variant="Variant.Outlined" Size="Size.Small"
+                               Disabled="_busy" OnClick="@(() => RejectAsync(task))" data-action="reject">
+                        @I18n.T("ui.tasks.reject")
+                    </MudButton>
+
+                    <MudSpacer />
+                    <MudSelect T="Guid?" Label="@I18n.T("ui.tasks.delegateTo")" Dense="true" Variant="Variant.Outlined"
+                               Style="min-width: 14rem" @bind-Value="_delegateTo[task.Id]">
+                        @foreach (var user in _users)
+                        {
+                            <MudSelectItem T="Guid?" Value="@((Guid?)user.Id)">@(string.IsNullOrWhiteSpace(user.DisplayName) ? user.Email : user.DisplayName)</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudButton Variant="Variant.Text" Size="Size.Small"
+                               Disabled="@(_busy || _delegateTo.GetValueOrDefault(task.Id) is null)"
+                               OnClick="@(() => DelegateAsync(task))" data-action="delegate">
+                        @I18n.T("ui.tasks.delegate")
+                    </MudButton>
+                </div>
+            </MudPaper>
+        }
+    }
+</MudPaper>
+
+@code {
+    [Parameter] public Guid? TaskId { get; set; }
+
+    private IReadOnlyList<ClientTask> _tasks = [];
+    private IReadOnlyList<ClientUserSummary> _users = [];
+    private readonly Dictionary<Guid, string?> _comments = new();
+    private readonly Dictionary<Guid, Guid?> _delegateTo = new();
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        I18n.OnLocaleChanged += StateHasChanged;
+
+        if (Api.CurrentAuth is null)
+        {
+            await Api.DevLoginAsync();
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _tasks = await Api.GetTasksAsync();
+            _users = await Api.GetUsersAsync();
+            foreach (var task in _tasks)
+            {
+                _comments.TryAdd(task.Id, null);
+                _delegateTo.TryAdd(task.Id, null);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Task ApproveAsync(ClientTask task) => RunAsync(() => Api.ApproveTaskAsync(task.Id, _comments.GetValueOrDefault(task.Id)));
+
+    private Task RejectAsync(ClientTask task) => RunAsync(() => Api.RejectTaskAsync(task.Id, _comments.GetValueOrDefault(task.Id)));
+
+    private Task DelegateAsync(ClientTask task) =>
+        RunAsync(() => Api.DelegateTaskAsync(task.Id, _delegateTo[task.Id]!.Value));
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose() => I18n.OnLocaleChanged -= StateHasChanged;
+}

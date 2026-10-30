@@ -1,0 +1,94 @@
+id: demo.approvals
+version: 1.0.0
+name: Utleggsgodkjenning
+publisher: Laftverk
+license: Apache-2.0
+sdk: ">=1.0.0 <2.0.0"
+
+enums:
+  demo.expensestatus: [draft, pending, approved]
+
+objects:
+  demo.expense:
+    label: Utlegg
+    fields:
+      title:
+        type: string
+        required: true
+        maxLength: 200
+        label: approvals.fields.title
+      amount:
+        type: decimal
+        required: true
+        scale: 2
+        label: approvals.fields.amount
+      comment:
+        type: text
+        editableInWorkflow: true
+        label: approvals.fields.comment
+      status:
+        type: enum
+        of: demo.expensestatus
+        required: true
+        default: draft
+        label: approvals.fields.status
+    status:
+      field: status
+      initial: draft
+      transitions:
+        submit:
+          from: draft
+          to: pending
+          permission: update
+          workflow: demo.expense.approval
+        approve:
+          from: pending
+          to: approved
+          permission: approve
+          locksRecord: true
+        reject:
+          from: pending
+          to: draft
+          permission: approve
+
+# Standard godkjenningsflyt. Tenanten kan overstyre den i klienten.
+workflows:
+  - id: demo.expense.approval
+    object: demo.expense
+    trigger: submit
+    mode: sequential
+    delegation: allowed
+    deadline:
+      days: 3
+      escalateTo: { role: demo.finance }
+    onComplete: approve
+    onReject: reject
+    steps:
+      - name: Avdelingsleder
+        assignee: { role: demo.manager }
+        when: { field: amount, gt: 0 }
+      - name: Økonomisjef
+        assignee: { role: demo.finance }
+        when: { field: amount, gt: 50000 }
+
+pages:
+  - pages/expense-list.yaml
+  - pages/expense-card.yaml
+
+permissionSets:
+  - id: demo.approvals.viewer
+    label: Utleggslesing
+    grants:
+      demo.expense: [read]
+  - id: demo.approvals.user
+    label: Utleggsbruker
+    grants:
+      demo.expense: [read, create, update, delete]
+
+attention:
+  - id: demo.approvals.drafts
+    label: Utlegg i kladd
+    source: { query: demo.expense, filter: { status: draft } }
+    severity: info
+    audience: { permission: demo.expense.read }
+    action: { page: demo.expense-list }

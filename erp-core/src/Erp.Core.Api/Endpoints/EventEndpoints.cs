@@ -62,7 +62,7 @@ public static class EventEndpoints
             Results.Ok(new { secret = await service.GetWebhookSecretAsync(ct) }));
     }
 
-    private static async ValueTask<object?> RequireTenantAdminAsync(
+    internal static async ValueTask<object?> RequireTenantAdminAsync(
         EndpointFilterInvocationContext context,
         EndpointFilterDelegate next)
     {

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Erp.Core.Domain.Apps;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Apps;
+using Erp.Core.Infrastructure.Attention;
 using Erp.Core.Infrastructure.Persistence;
 using NpgsqlTypes;
 
@@ -16,7 +17,8 @@ namespace Erp.Core.Infrastructure.Events;
 public sealed class EventPublisher(
     CoreDbContext dbContext,
     ITenantContext tenantContext,
-    EventDeliveryWakeSignal wakeSignal)
+    EventDeliveryWakeSignal wakeSignal,
+    AttentionCache attentionCache)
 {
     private bool _hasUnnotifiedEvents;
 
@@ -107,6 +109,12 @@ public sealed class EventPublisher(
         {
             _hasUnnotifiedEvents = false;
             wakeSignal.Notify();
+
+            // Attention counts follow the data: any committed event may change a user's counts.
+            if (tenantContext.TenantId is { } tenantId)
+            {
+                attentionCache.InvalidateTenant(tenantId);
+            }
         }
     }
 

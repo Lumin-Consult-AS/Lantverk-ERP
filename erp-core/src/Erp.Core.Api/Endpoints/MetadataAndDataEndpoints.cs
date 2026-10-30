@@ -339,6 +339,10 @@ public static class MetadataAndDataEndpoints
         {
             return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status412PreconditionFailed);
         }
+        catch (PermissionDeniedException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
+        }
         catch (RecordValidationException ex)
         {
             return Results.BadRequest(new { error = ex.Message, field = ex.FieldName });

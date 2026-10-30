@@ -36,6 +36,11 @@ public sealed class FieldDefinition
     public FilterNode? VisibleWhen { get; set; }
 
     /// <summary>
+    /// Field may still be edited while the record is locked by a running workflow (e.g. coding on a voucher).
+    /// </summary>
+    public bool EditableInWorkflow { get; set; }
+
+    /// <summary>
     /// Target object ID (e.g. <c>core.party</c>) when <see cref="Type"/> is <see cref="FieldType.Reference"/>.
     /// </summary>
     public string? TargetObject { get; set; }

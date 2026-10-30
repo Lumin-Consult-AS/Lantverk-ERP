@@ -1,4 +1,5 @@
 using Erp.Core.Domain.Metadata;
+using Erp.Core.Domain.Workflow;
 
 namespace Erp.Core.Domain.Apps;
 
@@ -27,6 +28,9 @@ public sealed class AppManifest
     public List<PermissionSetDefinition> PermissionSets { get; set; } = [];
     public List<MigrationDefinition> Migrations { get; set; } = [];
     public List<AttentionDefinition> AttentionItems { get; set; } = [];
+
+    /// <summary>Default approval flows shipped by the app; copied into the tenant's workflow definitions on install.</summary>
+    public List<WorkflowDefinition> Workflows { get; set; } = [];
 
     /// <summary>
     /// Localization dictionaries keyed by locale code (e.g. <c>nb</c>, <c>en</c>).

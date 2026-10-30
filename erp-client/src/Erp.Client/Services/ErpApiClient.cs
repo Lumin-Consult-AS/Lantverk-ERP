@@ -329,5 +329,62 @@ public sealed class ErpApiClient(HttpClient httpClient, I18nService i18n)
 
         response.EnsureSuccessStatusCode();
     }
-}
 
+    // ------------------------------------------------------------------ workflow, tasks and attention
+
+    public async Task<IReadOnlyList<ClientAttentionItem>> GetAttentionAsync(CancellationToken ct = default) =>
+        await httpClient.GetFromJsonAsync<List<ClientAttentionItem>>("/api/v1/attention", JsonOptions, ct) ?? [];
+
+    public async Task HideAttentionAsync(string id, CancellationToken ct = default)
+    {
+        using var res = await httpClient.PostAsync($"/api/v1/attention/{Uri.EscapeDataString(id)}/hide", null, ct);
+        await EnsureSuccessOrThrowReadableAsync(res, ct);
+    }
+
+    public async Task SnoozeAttentionAsync(string id, int hours, CancellationToken ct = default)
+    {
+        using var res = await httpClient.PostAsJsonAsync(
+            $"/api/v1/attention/{Uri.EscapeDataString(id)}/snooze", new { hours }, JsonOptions, ct);
+        await EnsureSuccessOrThrowReadableAsync(res, ct);
+    }
+
+    public async Task RestoreAttentionAsync(string id, CancellationToken ct = default)
+    {
+        using var res = await httpClient.DeleteAsync($"/api/v1/attention/{Uri.EscapeDataString(id)}/dismissal", ct);
+        await EnsureSuccessOrThrowReadableAsync(res, ct);
+    }
+
+    public async Task<IReadOnlyList<ClientTask>> GetTasksAsync(string? status = "open", bool mine = true, CancellationToken ct = default) =>
+        await httpClient.GetFromJsonAsync<List<ClientTask>>(
+            $"/api/v1/tasks?mine={mine.ToString().ToLowerInvariant()}" + (status is null ? string.Empty : $"&status={Uri.EscapeDataString(status)}"),
+            JsonOptions,
+            ct) ?? [];
+
+    public Task ApproveTaskAsync(Guid taskId, string? comment, CancellationToken ct = default) =>
+        PostTaskActionAsync(taskId, "approve", new { comment }, ct);
+
+    public Task RejectTaskAsync(Guid taskId, string? comment, CancellationToken ct = default) =>
+        PostTaskActionAsync(taskId, "reject", new { comment }, ct);
+
+    public Task DelegateTaskAsync(Guid taskId, Guid userId, CancellationToken ct = default) =>
+        PostTaskActionAsync(taskId, "delegate", new { userId }, ct);
+
+    private async Task PostTaskActionAsync(Guid taskId, string action, object body, CancellationToken ct)
+    {
+        using var res = await httpClient.PostAsJsonAsync($"/api/v1/tasks/{taskId:D}/{action}", body, JsonOptions, ct);
+        await EnsureSuccessOrThrowReadableAsync(res, ct);
+    }
+
+    public async Task<IReadOnlyList<ClientWorkflowEntry>> GetWorkflowsAsync(CancellationToken ct = default) =>
+        await httpClient.GetFromJsonAsync<List<ClientWorkflowEntry>>("/api/v1/workflows", JsonOptions, ct) ?? [];
+
+    public async Task SaveWorkflowAsync(ClientWorkflowDefinition definition, CancellationToken ct = default)
+    {
+        using var res = await httpClient.PutAsJsonAsync(
+            $"/api/v1/workflows/{Uri.EscapeDataString(definition.Id)}", definition, JsonOptions, ct);
+        await EnsureSuccessOrThrowReadableAsync(res, ct);
+    }
+
+    public async Task<IReadOnlyList<ClientUserSummary>> GetUsersAsync(CancellationToken ct = default) =>
+        await httpClient.GetFromJsonAsync<List<ClientUserSummary>>("/api/v1/core/users", JsonOptions, ct) ?? [];
+}

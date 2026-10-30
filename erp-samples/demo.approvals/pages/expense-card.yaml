@@ -1,0 +1,16 @@
+id: demo.expense-card
+type: card
+object: demo.expense
+title: "{title}"
+groups:
+  - label: approvals.card.general
+    fields:
+      - title
+      - amount
+      - comment
+      - status
+actions:
+  - id: submit
+    label: approvals.actions.submit
+    transition: submit
+    placement: primary

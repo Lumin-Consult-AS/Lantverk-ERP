@@ -179,7 +179,53 @@
           "action": { "type": "object" }
         }
       }
+    },
+    "workflows": {
+      "type": "array",
+      "description": "Default approval flows attached to status transitions; the tenant may edit its copy.",
+      "items": {
+        "type": "object",
+        "required": ["id", "object", "steps"],
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "type": "string" },
+          "trigger": { "type": "string" },
+          "mode": { "type": "string", "enum": ["sequential", "parallel"] },
+          "delegation": { "type": "string", "enum": ["allowed", "none"] },
+          "onComplete": { "type": "string" },
+          "onReject": { "type": "string" },
+          "deadline": {
+            "type": "object",
+            "properties": {
+              "days": { "type": "integer", "minimum": 1 },
+              "escalateTo": { "$ref": "#/$defs/workflowAssignee" }
+            }
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["name", "assignee"],
+              "properties": {
+                "name": { "type": "string" },
+                "assignee": { "$ref": "#/$defs/workflowAssignee" },
+                "when": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "workflowAssignee": {
+      "type": "object",
+      "description": "Exactly one of role or user. Dimension-based rules are not supported yet.",
+      "properties": {
+        "role": { "type": "string" },
+        "user": { "type": "string", "format": "uuid" }
+      }
     }
   }
 }
-
