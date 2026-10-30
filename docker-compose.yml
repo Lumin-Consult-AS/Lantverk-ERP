@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: erp-postgres
+    environment:
+      POSTGRES_DB: erp
+      POSTGRES_USER: erp_migrator
+      POSTGRES_PASSWORD: erp_migrator_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-roles.sql:/docker-entrypoint-initdb.d/01-init-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp_migrator -d erp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: erp-keycloak
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/keycloak/realm-erp-dev.json:/opt/keycloak/data/import/realm-erp-dev.json:ro
+
+  minio:
+    image: minio/minio:latest
+    container_name: erp-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: erp_minio
+      MINIO_ROOT_PASSWORD: erp_minio_dev_password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: erp-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  erp-core:
+    build:
+      context: ./erp-core
+      dockerfile: Dockerfile
+    container_name: erp-core
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Database__AutoMigrateAndSeed: "true"
+      ConnectionStrings__MigrationConnection: "Host=postgres;Port=5432;Database=erp;Username=erp_migrator;Password=erp_migrator_dev"
+      ConnectionStrings__ApplicationConnection: "Host=postgres;Port=5432;Database=erp;Username=erp_app;Password=erp_app_dev"
+      Auth__OidcAuthority: "http://keycloak:8080/realms/erp-dev"
+      Auth__OidcAudience: "erp-web"
+      Auth__RequireHttpsMetadata: "false"
+    ports:
+      - "5000:8080"
+
+volumes:
+  postgres_data:
+  minio_data:
+
