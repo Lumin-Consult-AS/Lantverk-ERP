@@ -1,0 +1,13 @@
+<Router AppAssembly="@typeof(App).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <PageTitle>404</PageTitle>
+        <LayoutView Layout="@typeof(MainLayout)">
+            <MudAlert Severity="Severity.Warning" Class="ma-4">Siden ble ikke funnet.</MudAlert>
+        </LayoutView>
+    </NotFound>
+</Router>
+

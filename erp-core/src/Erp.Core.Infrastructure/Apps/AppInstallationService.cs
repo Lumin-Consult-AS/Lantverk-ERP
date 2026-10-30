@@ -268,6 +268,39 @@ public sealed class AppInstallationService(
         return result;
     }
 
+    public async Task<IReadOnlyDictionary<string, string>> GetTranslationsAsync(
+        string locale,
+        CancellationToken cancellationToken = default)
+    {
+        var apps = await dbContext.InstalledApps
+            .AsNoTracking()
+            .OrderBy(a => a.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var app in apps)
+        {
+            var allLocales = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, string>>>(
+                app.TranslationsJson,
+                JsonOptions);
+            if (allLocales is null) continue;
+
+            // Fallback to 'nb' first, then overlay requested locale
+            if (allLocales.TryGetValue("nb", out var nbMap))
+            {
+                foreach (var (k, v) in nbMap) merged[k] = v;
+            }
+
+            if (!string.Equals(locale, "nb", StringComparison.OrdinalIgnoreCase)
+                && allLocales.TryGetValue(locale, out var reqMap))
+            {
+                foreach (var (k, v) in reqMap) merged[k] = v;
+            }
+        }
+
+        return merged;
+    }
+
     public async Task<IReadOnlyList<MetadataSnapshot>> GetSnapshotsAsync(CancellationToken cancellationToken = default)
         => await dbContext.MetadataSnapshots
             .AsNoTracking()

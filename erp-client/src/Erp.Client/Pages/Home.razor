@@ -1,0 +1,117 @@
+@page "/"
+@inject ErpApiClient Api
+@inject I18nService I18n
+@inject NavigationManager Nav
+@implements IDisposable
+
+<MudGrid>
+    <MudItem xs="12" md="7">
+        <MudPaper Elevation="2" Class="pa-4 mb-4">
+            <MudText Typo="Typo.h5" Class="mb-3">@I18n.T("ui.nav.home")</MudText>
+            <MudAlert Severity="Severity.Info">@I18n.T("ui.status.worklistEmpty")</MudAlert>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="5">
+        <MudPaper Elevation="2" Class="pa-4 mb-4">
+            <div class="d-flex align-center justify-space-between mb-3">
+                <MudText Typo="Typo.h6">@I18n.T("ui.nav.apps")</MudText>
+                @if (!IsCorePartiesInstalled)
+                {
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Size="Size.Small"
+                               OnClick="@InstallCorePartiesAsync"
+                               data-action="install-core-parties">
+                        @I18n.T("ui.action.installCoreParties")
+                    </MudButton>
+                }
+            </div>
+
+            @if (_installedApps.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    Ingen apper er installert i denne tenanten ennå.
+                </MudText>
+            }
+            else
+            {
+                <MudSimpleTable Dense="true" Bordered="true">
+                    <thead>
+                        <tr>
+                            <th>App</th>
+                            <th>Versjon</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var app in _installedApps)
+                        {
+                            <tr data-app-id="@app.AppId">
+                                <td><b>@app.Name</b> (@app.AppId)</td>
+                                <td>@app.Version</td>
+                                <td class="d-flex justify-end gap-1">
+                                    @if (string.Equals(app.AppId, "core.parties", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        <MudButton Size="Size.Small"
+                                                   Variant="Variant.Filled"
+                                                   Color="Color.Primary"
+                                                   OnClick="@(() => Nav.NavigateTo("/page/core.party-list"))">
+                                            Åpne
+                                        </MudButton>
+                                    }
+                                    <MudButton Size="Size.Small"
+                                               Variant="Variant.Outlined"
+                                               Color="Color.Error"
+                                               OnClick="@(() => UninstallAppAsync(app.AppId))">
+                                        @I18n.T("ui.action.uninstall")
+                                    </MudButton>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private IReadOnlyList<ClientInstalledAppSummary> _installedApps =>
+        Api.CurrentSession?.InstalledApps ?? [];
+
+    private bool IsCorePartiesInstalled =>
+        _installedApps.Any(a => string.Equals(a.AppId, "core.parties", StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        Api.OnStateChanged += StateHasChanged;
+        I18n.OnLocaleChanged += StateHasChanged;
+
+        if (Api.CurrentAuth is null)
+        {
+            await Api.DevLoginAsync();
+        }
+        else if (Api.CurrentSession is null)
+        {
+            await Api.RefreshSessionAndMetadataAsync();
+        }
+    }
+
+    private async Task InstallCorePartiesAsync()
+    {
+        await Api.InstallBuiltInAppAsync("core.parties");
+    }
+
+    private async Task UninstallAppAsync(string appId)
+    {
+        await Api.UninstallAppAsync(appId);
+    }
+
+    public void Dispose()
+    {
+        Api.OnStateChanged -= StateHasChanged;
+        I18n.OnLocaleChanged -= StateHasChanged;
+    }
+}
+

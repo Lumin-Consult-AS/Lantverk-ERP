@@ -1,0 +1,134 @@
+@inject ErpApiClient Api
+@inject I18nService I18n
+
+@if (IsOpen && ObjectDefinition is not null)
+{
+    <MudPaper Elevation="4" Class="pa-4 my-3" Style="border: 1px solid var(--mud-palette-primary);" data-dialog="@ObjectDefinition.Id">
+        <MudText Typo="Typo.h6" Class="mb-3">
+            @Title
+        </MudText>
+
+        @if (!string.IsNullOrEmpty(_apiError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@_apiError</MudAlert>
+        }
+
+        <MudGrid>
+            @foreach (var field in EditableFields)
+            {
+                var exposed = field.GetExposedName(ObjectDefinition.OwnerApp);
+                _validationErrors.TryGetValue(exposed, out var err);
+                <MudItem xs="12" sm="6">
+                    <DeclarativeFieldEditor Field="@field"
+                                            ObjectOwnerApp="@ObjectDefinition.OwnerApp"
+                                            RecordFields="@_draftFields"
+                                            EnumValues="@GetEnumValues(field)"
+                                            ValidationError="@err"
+                                            OnValueChanged="@Revalidate" />
+                </MudItem>
+            }
+        </MudGrid>
+
+        <div class="d-flex justify-end gap-2 mt-3">
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="@OnCancel">
+                @I18n.T("ui.action.cancel")
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@SaveAsync" data-action="dialog-save">
+                @I18n.T("ui.action.save")
+            </MudButton>
+        </div>
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public ClientObjectDefinition? ObjectDefinition { get; set; }
+    [Parameter] public IReadOnlyDictionary<string, ClientEnumDefinition> EnumsById { get; set; } = new Dictionary<string, ClientEnumDefinition>();
+    [Parameter] public Dictionary<string, object?>? InitialFields { get; set; }
+    [Parameter] public Guid? EditingRecordId { get; set; }
+    [Parameter] public long? EditingRowVersion { get; set; }
+    [Parameter] public IReadOnlySet<string>? HiddenFieldNames { get; set; }
+    [Parameter] public EventCallback<ClientRecordData> OnSaved { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private Dictionary<string, object?> _draftFields = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, string> _validationErrors = new(StringComparer.OrdinalIgnoreCase);
+    private string? _apiError;
+
+    private IEnumerable<ClientFieldDefinition> EditableFields =>
+        ObjectDefinition?.Fields.Where(f => HiddenFieldNames is null || !HiddenFieldNames.Contains(f.Name))
+        ?? [];
+
+    protected override void OnParametersSet()
+    {
+        if (ObjectDefinition is null) return;
+        _draftFields = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var field in ObjectDefinition.Fields)
+        {
+            var exposed = field.GetExposedName(ObjectDefinition.OwnerApp);
+            if (InitialFields is not null && InitialFields.TryGetValue(exposed, out var initVal))
+            {
+                _draftFields[exposed] = initVal;
+            }
+            else if (field.DefaultValue is not null)
+            {
+                _draftFields[exposed] = I18nService.UnwrapDisplayString(field.DefaultValue);
+            }
+        }
+        _validationErrors.Clear();
+        _apiError = null;
+    }
+
+    private void Revalidate()
+    {
+        if (ObjectDefinition is null) return;
+        _validationErrors = ClientFieldValidator.ValidateRecord(ObjectDefinition, _draftFields, I18n);
+    }
+
+    private IReadOnlyList<string> GetEnumValues(ClientFieldDefinition field)
+    {
+        if (!string.IsNullOrWhiteSpace(field.EnumType)
+            && EnumsById.TryGetValue(field.EnumType, out var enumDef))
+        {
+            return enumDef.Values;
+        }
+        return [];
+    }
+
+    private async Task SaveAsync()
+    {
+        if (ObjectDefinition is null) return;
+        _apiError = null;
+        _validationErrors = ClientFieldValidator.ValidateRecord(ObjectDefinition, _draftFields, I18n);
+        if (_validationErrors.Count > 0)
+        {
+            return;
+        }
+
+        try
+        {
+            ClientRecordData saved;
+            if (EditingRecordId.HasValue && EditingRowVersion.HasValue)
+            {
+                saved = await Api.UpdateRecordAsync(
+                    ObjectDefinition.Id,
+                    EditingRecordId.Value,
+                    EditingRowVersion.Value,
+                    _draftFields);
+            }
+            else
+            {
+                saved = await Api.CreateRecordAsync(ObjectDefinition.Id, _draftFields);
+            }
+
+            await OnSaved.InvokeAsync(saved);
+        }
+        catch (Exception ex)
+        {
+            _apiError = ex.Message;
+        }
+    }
+}
+

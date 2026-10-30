@@ -1,0 +1,294 @@
+@inject ErpApiClient Api
+@inject I18nService I18n
+@inject NavigationManager Nav
+
+<MudPaper Elevation="2" Class="pa-4" data-page-id="@Page.Id" data-page-type="list">
+    <div class="d-flex flex-wrap align-center justify-space-between mb-4 gap-2">
+        <MudText Typo="Typo.h5">@I18n.T(Page.Title, ObjectDefinition.Label)</MudText>
+        <div class="d-flex gap-2">
+            @if (_selectedRecordIds.Count > 0)
+            {
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.DeleteSweep"
+                           OnClick="@ExecuteBulkDeleteAsync"
+                           data-action="bulk-delete">
+                    @I18n.T("ui.action.deleteSelected") (@_selectedRecordIds.Count)
+                </MudButton>
+            }
+            <MudButton Variant="Variant.Outlined"
+                       StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="@LoadRecordsAsync">
+                @I18n.T("ui.action.refresh")
+            </MudButton>
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="@OpenNewRecord"
+                       data-action="new-record">
+                @I18n.T("ui.action.new")
+            </MudButton>
+        </div>
+    </div>
+
+    <MudGrid Class="mb-3">
+        <MudItem xs="12" sm="5">
+            <MudTextField T="string"
+                          Placeholder="@I18n.T("ui.action.search")"
+                           @bind-Value="_searchText"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="5">
+            <MudTextField T="string"
+                          Placeholder="@I18n.T("ui.action.filter")"
+                          @bind-Value="_customFilter"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="2" Class="d-flex gap-1 align-center">
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="@LoadRecordsAsync" data-action="apply-filter">
+                @I18n.T("ui.action.applyFilter")
+            </MudButton>
+            <MudButton Variant="Variant.Text" OnClick="@ResetFilterAsync">
+                @I18n.T("ui.action.clearFilter")
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-3">@_errorMessage</MudAlert>
+    }
+
+    <MudSimpleTable Hover="true" Dense="true" Bordered="true" Striped="true" Style="overflow-x: auto;">
+        <thead>
+            <tr>
+                <th style="width: 42px;">
+                    <input type="checkbox"
+                           checked="@IsAllSelected"
+                           @onchange="@ToggleSelectAll" />
+                </th>
+                @foreach (var col in VisibleColumns)
+                {
+                    <th style="cursor: pointer;" @onclick="@(() => SortByColumnAsync(col))">
+                        @GetColumnHeader(col)
+                        @if (string.Equals(_sortColumn, col, StringComparison.OrdinalIgnoreCase))
+                        {
+                            <span>@(_sortDesc ? " ▼" : " ▲")</span>
+                        }
+                    </th>
+                }
+                <th style="width: 90px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (_records.Count == 0)
+            {
+                <tr>
+                    <td colspan="@(VisibleColumns.Count + 2)" class="text-center py-4">
+                        @I18n.T("ui.status.emptyList")
+                    </td>
+                </tr>
+            }
+            else
+            {
+                @foreach (var rec in _records)
+                {
+                    <tr data-record-id="@rec.Id">
+                        <td>
+                            <input type="checkbox"
+                                   checked="@_selectedRecordIds.Contains(rec.Id)"
+                                   @onchange="@(e => ToggleRecordSelection(rec.Id, e.Value is true))" />
+                        </td>
+                        @foreach (var col in VisibleColumns)
+                        {
+                            <td style="cursor: pointer;" @onclick="@(() => OpenRecord(rec.Id))">
+                                @FormatCellValue(rec, col)
+                            </td>
+                        }
+                        <td>
+                            <MudButton Size="Size.Small"
+                                       Variant="Variant.Text"
+                                       Color="Color.Primary"
+                                       OnClick="@(() => OpenRecord(rec.Id))"
+                                       data-action="open-card">
+                                @I18n.T("ui.action.edit")
+                            </MudButton>
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </MudSimpleTable>
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public ClientPageDefinition Page { get; set; } = default!;
+    [Parameter, EditorRequired] public ClientObjectDefinition ObjectDefinition { get; set; } = default!;
+    [Parameter] public string? CompanionCardPageId { get; set; }
+
+    private List<ClientRecordData> _records = [];
+    private readonly HashSet<Guid> _selectedRecordIds = [];
+    private string? _searchText;
+    private string? _customFilter;
+    private string? _sortColumn;
+    private bool _sortDesc;
+    private string? _errorMessage;
+
+    private IReadOnlyList<string> VisibleColumns =>
+        Page.Columns.Count > 0
+            ? Page.Columns
+            : ObjectDefinition.Fields.Select(f => f.GetExposedName(ObjectDefinition.OwnerApp)).ToList();
+
+    private bool IsAllSelected => _records.Count > 0 && _records.All(r => _selectedRecordIds.Contains(r.Id));
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadRecordsAsync();
+    }
+
+    public async Task LoadRecordsAsync()
+    {
+        _errorMessage = null;
+        try
+        {
+            var filter = ErpApiClient.BuildSearchAndCustomFilter(ObjectDefinition, _searchText, _customFilter);
+            var orderBy = string.IsNullOrWhiteSpace(_sortColumn)
+                ? null
+                : $"{_sortColumn} {(_sortDesc ? "desc" : "asc")}";
+
+            var result = await Api.QueryRecordsAsync(ObjectDefinition.Id, filter: filter, orderBy: orderBy);
+            _records = result.ToList();
+            _selectedRecordIds.RemoveWhere(id => _records.All(r => r.Id != id));
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+    }
+
+    private async Task ResetFilterAsync()
+    {
+        _searchText = null;
+        _customFilter = null;
+        _sortColumn = null;
+        _sortDesc = false;
+        await LoadRecordsAsync();
+    }
+
+    private async Task SortByColumnAsync(string col)
+    {
+        if (string.Equals(_sortColumn, col, StringComparison.OrdinalIgnoreCase))
+        {
+            _sortDesc = !_sortDesc;
+        }
+        else
+        {
+            _sortColumn = col;
+            _sortDesc = false;
+        }
+
+        await LoadRecordsAsync();
+    }
+
+    private void ToggleSelectAll(ChangeEventArgs e)
+    {
+        var check = e.Value is true;
+        _selectedRecordIds.Clear();
+        if (check)
+        {
+            foreach (var r in _records) _selectedRecordIds.Add(r.Id);
+        }
+    }
+
+    private void ToggleRecordSelection(Guid id, bool selected)
+    {
+        if (selected) _selectedRecordIds.Add(id);
+        else _selectedRecordIds.Remove(id);
+    }
+
+    private async Task ExecuteBulkDeleteAsync()
+    {
+        if (_selectedRecordIds.Count == 0) return;
+        _errorMessage = null;
+        try
+        {
+            var ops = _records
+                .Where(r => _selectedRecordIds.Contains(r.Id))
+                .Select(r => new ClientBatchOperation
+                {
+                    Method = ClientBatchMethod.Delete,
+                    ObjectId = ObjectDefinition.Id,
+                    Id = r.Id,
+                    RowVersion = r.RowVersion
+                })
+                .ToList();
+
+            await Api.ExecuteBatchAsync(ops);
+            _selectedRecordIds.Clear();
+            await LoadRecordsAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+    }
+
+    private void OpenNewRecord()
+    {
+        var cardId = ResolveCardPageId();
+        Nav.NavigateTo($"/page/{cardId}/new");
+    }
+
+    private void OpenRecord(Guid id)
+    {
+        var cardId = ResolveCardPageId();
+        Nav.NavigateTo($"/page/{cardId}/{id:D}");
+    }
+
+    private string ResolveCardPageId()
+    {
+        if (!string.IsNullOrWhiteSpace(CompanionCardPageId))
+        {
+            return CompanionCardPageId;
+        }
+
+        if (Page.Id.EndsWith("-list", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{Page.Id[..^5]}-card";
+        }
+
+        return Page.Id;
+    }
+
+    private string GetColumnHeader(string columnKey)
+    {
+        var field = ObjectDefinition.Fields.FirstOrDefault(f =>
+            string.Equals(f.Name, columnKey, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(f.GetExposedName(ObjectDefinition.OwnerApp), columnKey, StringComparison.OrdinalIgnoreCase));
+
+        var fallback = field?.Label ?? columnKey;
+        var shortName = field?.Name ?? columnKey;
+        return I18n.T($"parties.fields.{shortName}", I18n.T(fallback, fallback));
+    }
+
+    private static string FormatCellValue(ClientRecordData record, string columnKey)
+    {
+        if (record.Fields.TryGetValue(columnKey, out var val) && val is not null)
+        {
+            return I18nService.UnwrapDisplayString(val);
+        }
+
+        var shortKey = columnKey.Contains('.') ? columnKey[(columnKey.LastIndexOf('.') + 1)..] : columnKey;
+        if (record.Fields.TryGetValue(shortKey, out var val2) && val2 is not null)
+        {
+            return I18nService.UnwrapDisplayString(val2);
+        }
+
+        return string.Empty;
+    }
+}
+

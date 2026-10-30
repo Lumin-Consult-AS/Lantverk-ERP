@@ -263,7 +263,8 @@ public sealed class RecordDataService(
 
         return await ExecuteWithConnectionAsync(async (conn, tx) =>
         {
-            if (objectDef.Fields.Any(f => f.RequiredWhen is not null || f.ReadOnlyWhen is not null))
+            if (objectDef.Status is not null
+                || objectDef.Fields.Any(f => f.RequiredWhen is not null || f.ReadOnlyWhen is not null))
             {
                 await ValidateConditionalRulesOnUpdateAsync(conn, tx, objectDef, id, fields, cancellationToken);
             }
@@ -336,6 +337,82 @@ public sealed class RecordDataService(
 
             // Distinguish between 404 Not Found and 412 Concurrency Conflict
             await ThrowNotFoundOrConcurrencyConflictAsync(conn, tx, schema, table, objectDef.Id, id, expectedRowVersion, cancellationToken);
+            throw new RecordNotFoundException(objectDef.Id, id);
+        }, cancellationToken);
+    }
+
+    public async Task<RecordData> TransitionStatusAsync(
+        string objectId,
+        Guid id,
+        string transitionName,
+        long? expectedRowVersion = null,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var objectDef = await RequireObjectAsync(objectId, cancellationToken);
+        if (objectDef.Status is null
+            || !objectDef.Status.Transitions.TryGetValue(transitionName, out var transition))
+        {
+            throw new RecordValidationException(
+                $"Object '{objectDef.Id}' does not define status transition '{transitionName}'.");
+        }
+
+        var existing = await GetAsync(objectId, id, companyId, cancellationToken)
+            ?? throw new RecordNotFoundException(objectId, id);
+
+        var statusFieldName = string.IsNullOrWhiteSpace(objectDef.Status.Field) ? "status" : objectDef.Status.Field;
+        existing.Fields.TryGetValue(statusFieldName, out var currentStatusObj);
+        var currentStatus = Convert.ToString(currentStatusObj, CultureInfo.InvariantCulture) ?? string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(transition.From)
+            && !string.Equals(currentStatus, transition.From, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new RecordValidationException(
+                $"Cannot execute transition '{transitionName}' on '{objectDef.Id}' from status '{currentStatus}' (expected '{transition.From}').",
+                statusFieldName);
+        }
+
+        var rowVer = expectedRowVersion ?? existing.RowVersion;
+        var (schema, table) = objectDef.GetSchemaAndTable();
+        var statusFieldDef = objectDef.Fields.FirstOrDefault(
+            f => string.Equals(f.Name, statusFieldName, StringComparison.OrdinalIgnoreCase));
+        var statusCol = statusFieldDef?.GetColumnName(objectDef.OwnerApp)
+            ?? IdentifierNaming.ToSnakeCase(statusFieldName);
+        var userId = tenantContext.UserId ?? tenantContext.TenantId ?? Guid.Empty;
+        var now = DateTimeOffset.UtcNow;
+
+        return await ExecuteWithConnectionAsync(async (conn, tx) =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+
+            AddParameter(cmd, "id", id);
+            AddParameter(cmd, "expected_row_version", rowVer);
+            AddParameter(cmd, "new_status", transition.To);
+            AddParameter(cmd, "updated_at", now);
+            AddParameter(cmd, "updated_by", userId);
+
+            cmd.CommandText =
+                $"""
+                UPDATE "{schema}"."{table}"
+                   SET "{statusCol}" = @new_status,
+                       "updated_at" = @updated_at,
+                       "updated_by" = @updated_by,
+                       "row_version" = "row_version" + 1
+                 WHERE id = @id
+                   AND row_version = @expected_row_version
+                RETURNING *;
+                """;
+
+            await using (var reader = await cmd.ExecuteReaderAsync(cancellationToken))
+            {
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    return ReadRecord(reader, objectDef);
+                }
+            }
+
+            await ThrowNotFoundOrConcurrencyConflictAsync(conn, tx, schema, table, objectDef.Id, id, rowVer, cancellationToken);
             throw new RecordNotFoundException(objectDef.Id, id);
         }, cancellationToken);
     }
@@ -1147,6 +1224,23 @@ public sealed class RecordDataService(
         if (existingRecord is null)
         {
             throw new RecordNotFoundException(objectDef.Id, id);
+        }
+
+        if (objectDef.Status is not null)
+        {
+            var statusFieldName = string.IsNullOrWhiteSpace(objectDef.Status.Field) ? "status" : objectDef.Status.Field;
+            if (existingRecord.Fields.TryGetValue(statusFieldName, out var curStatusObj))
+            {
+                var curStatus = Convert.ToString(curStatusObj, CultureInfo.InvariantCulture) ?? string.Empty;
+                var lockingTransition = objectDef.Status.Transitions.Values.FirstOrDefault(
+                    t => t.LocksRecord && string.Equals(t.To, curStatus, StringComparison.OrdinalIgnoreCase));
+                if (lockingTransition is not null)
+                {
+                    throw new RecordValidationException(
+                        $"Record '{id}' on '{objectDef.Id}' is locked in status '{curStatus}' and cannot be edited.",
+                        statusFieldName);
+                }
+            }
         }
 
         var mergedFields = new Dictionary<string, object?>(existingRecord.Fields, StringComparer.OrdinalIgnoreCase);

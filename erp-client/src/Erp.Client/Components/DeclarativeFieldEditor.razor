@@ -1,0 +1,142 @@
+@using System.Globalization
+@inject I18nService I18n
+
+@if (ClientFieldValidator.IsFieldVisible(Field, RecordFields))
+{
+    <div class="mb-3" data-field="@ExposedName">
+        @if (Field.Type == ClientFieldType.Boolean)
+        {
+            <MudCheckBox T="bool"
+                         Label="@DisplayLabel"
+                         Value="@GetBoolValue()"
+                         ValueChanged="@OnBoolChanged"
+                         Disabled="@IsReadOnly"
+                         Color="Color.Primary" />
+        }
+        else if (Field.Type == ClientFieldType.Enum && EnumValues.Count > 0)
+        {
+            <MudSelect T="string"
+                       Label="@DisplayLabel"
+                       Value="@GetStringValue()"
+                       ValueChanged="@OnStringChanged"
+                       Required="@IsRequired"
+                       ReadOnly="@IsReadOnly"
+                       Error="@(!string.IsNullOrEmpty(ValidationError))"
+                       ErrorText="@ValidationError"
+                       Variant="Variant.Outlined"
+                       Margin="Margin.Dense">
+                @foreach (var opt in EnumValues)
+                {
+                    <MudSelectItem T="string" Value="@opt">@opt</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        else if (Field.Type == ClientFieldType.Text)
+        {
+            <MudTextField T="string"
+                          Label="@DisplayLabel"
+                          Value="@GetStringValue()"
+                          ValueChanged="@OnStringChanged"
+                          Lines="3"
+                          Required="@IsRequired"
+                          ReadOnly="@IsReadOnly"
+                          MaxLength="@(Field.MaxLength ?? 4000)"
+                          Error="@(!string.IsNullOrEmpty(ValidationError))"
+                          ErrorText="@ValidationError"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense" />
+        }
+        else
+        {
+            <MudTextField T="string"
+                          Label="@DisplayLabel"
+                          Value="@GetStringValue()"
+                          ValueChanged="@OnStringChanged"
+                          Required="@IsRequired"
+                          ReadOnly="@IsReadOnly"
+                          MaxLength="@(Field.MaxLength ?? 255)"
+                          Error="@(!string.IsNullOrEmpty(ValidationError))"
+                          ErrorText="@ValidationError"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense" />
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public ClientFieldDefinition Field { get; set; } = default!;
+    [Parameter, EditorRequired] public string ObjectOwnerApp { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public Dictionary<string, object?> RecordFields { get; set; } = default!;
+    [Parameter] public IReadOnlyList<string> EnumValues { get; set; } = [];
+    [Parameter] public string? ValidationError { get; set; }
+    [Parameter] public EventCallback OnValueChanged { get; set; }
+
+    private string ExposedName => Field.GetExposedName(ObjectOwnerApp);
+    private bool IsRequired => ClientFieldValidator.IsFieldRequired(Field, RecordFields);
+    private bool IsReadOnly => ClientFieldValidator.IsFieldReadOnly(Field, RecordFields);
+
+    private string DisplayLabel
+    {
+        get
+        {
+            var baseLabel = I18n.T($"parties.fields.{Field.Name}", I18n.T(Field.Label, Field.Label ?? Field.Name));
+            return IsRequired ? $"{baseLabel} *" : baseLabel;
+        }
+    }
+
+    private string GetStringValue()
+    {
+        if (RecordFields.TryGetValue(ExposedName, out var val) && val is not null)
+        {
+            return I18nService.UnwrapDisplayString(val);
+        }
+
+        if (Field.DefaultValue is not null)
+        {
+            return I18nService.UnwrapDisplayString(Field.DefaultValue);
+        }
+
+        return string.Empty;
+    }
+
+    private bool GetBoolValue()
+    {
+        if (RecordFields.TryGetValue(ExposedName, out var val) && val is not null)
+        {
+            if (val is bool b) return b;
+            if (bool.TryParse(I18nService.UnwrapDisplayString(val), out var parsed)) return parsed;
+        }
+
+        if (Field.DefaultValue is bool defBool) return defBool;
+        return false;
+    }
+
+    private async Task OnStringChanged(string? newValue)
+    {
+        if (string.IsNullOrWhiteSpace(newValue))
+        {
+            RecordFields[ExposedName] = null;
+        }
+        else if (Field.Type == ClientFieldType.Integer && long.TryParse(newValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l))
+        {
+            RecordFields[ExposedName] = l;
+        }
+        else if (Field.Type == ClientFieldType.Decimal && decimal.TryParse(newValue, NumberStyles.Number, CultureInfo.InvariantCulture, out var d))
+        {
+            RecordFields[ExposedName] = d;
+        }
+        else
+        {
+            RecordFields[ExposedName] = newValue;
+        }
+
+        await OnValueChanged.InvokeAsync();
+    }
+
+    private async Task OnBoolChanged(bool newValue)
+    {
+        RecordFields[ExposedName] = newValue;
+        await OnValueChanged.InvokeAsync();
+    }
+}
+

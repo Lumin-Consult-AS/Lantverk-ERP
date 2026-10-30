@@ -10,11 +10,29 @@ groups:
       - partyType
       - role
       - organizationNumber
+      - status
       - isActive
   - label: parties.card.contact
     fields:
       - email
       - phone
+actions:
+  - id: deactivate
+    label: parties.actions.deactivate
+    transition: deactivate
+    placement: secondary
+  - id: activate
+    label: parties.actions.activate
+    transition: activate
+    placement: primary
+  - id: block
+    label: parties.actions.block
+    transition: block
+    placement: danger
+  - id: unblock
+    label: parties.actions.unblock
+    transition: unblock
+    placement: secondary
 tabs:
   - label: parties.card.addresses
     list:

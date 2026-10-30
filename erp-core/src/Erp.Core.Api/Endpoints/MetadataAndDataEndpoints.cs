@@ -230,6 +230,48 @@ public static class MetadataAndDataEndpoints
                 return Results.NoContent();
             });
         });
+
+        v1.MapPost("/{company}/{objectId}/{id:guid}/transitions/{transition}", async (
+            string company,
+            string objectId,
+            Guid id,
+            string transition,
+            HttpRequest request,
+            HttpResponse response,
+            ITenantContext tenantContext,
+            RecordDataService dataService,
+            CancellationToken ct) =>
+        {
+            long? expectedRowVersion = TryParseIfMatchRowVersion(request, out var rv) ? rv : null;
+            var companyId = ResolveCompanyId(company, tenantContext);
+            return await ExecuteDataActionAsync(async () =>
+            {
+                var updated = await dataService.TransitionStatusAsync(objectId, id, transition, expectedRowVersion, companyId, ct);
+                response.Headers.ETag = $"\"{updated.RowVersion}\"";
+                return Results.Ok(updated);
+            });
+        });
+
+        v1.MapPost("/{company}/{objectId}/{id:guid}/{transition}", async (
+            string company,
+            string objectId,
+            Guid id,
+            string transition,
+            HttpRequest request,
+            HttpResponse response,
+            ITenantContext tenantContext,
+            RecordDataService dataService,
+            CancellationToken ct) =>
+        {
+            long? expectedRowVersion = TryParseIfMatchRowVersion(request, out var rv) ? rv : null;
+            var companyId = ResolveCompanyId(company, tenantContext);
+            return await ExecuteDataActionAsync(async () =>
+            {
+                var updated = await dataService.TransitionStatusAsync(objectId, id, transition, expectedRowVersion, companyId, ct);
+                response.Headers.ETag = $"\"{updated.RowVersion}\"";
+                return Results.Ok(updated);
+            });
+        });
     }
 
     private static Guid? ResolveCompanyId(string companySegment, ITenantContext tenantContext)

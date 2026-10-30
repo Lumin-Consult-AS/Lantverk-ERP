@@ -14,5 +14,11 @@ parties:
     organizationNumber: Organization number
     email: Email
     phone: Phone
+    status: Status
     isActive: Active
+  actions:
+    deactivate: Deactivate
+    activate: Activate
+    block: Block party
+    unblock: Unblock party
 

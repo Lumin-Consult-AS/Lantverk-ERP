@@ -1,0 +1,102 @@
+@inherits LayoutComponentBase
+@inject ErpApiClient Api
+@inject I18nService I18n
+@implements IDisposable
+
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1" Color="Color.Primary">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu"
+                       Color="Color.Inherit"
+                       Edge="Edge.Start"
+                       OnClick="@(() => _drawerOpen = !_drawerOpen)" />
+        <MudText Typo="Typo.h6" Class="ml-2">@I18n.T("ui.app.title", "Laftverk ERP")</MudText>
+        <MudSpacer />
+        @if (Api.CurrentSession?.Tenant is not null)
+        {
+            <MudChip T="string" Color="Color.Secondary" Size="Size.Small" Class="mr-2">
+                @Api.CurrentSession.Tenant.Name · @(Api.CurrentSession.Company?.Name ?? "-")
+            </MudChip>
+        }
+        <MudButtonGroup Color="Color.Inherit" Variant="Variant.Outlined" Size="Size.Small">
+            <MudButton OnClick="@(() => SwitchLanguageAsync("nb"))"
+                       Disabled="@(I18n.CurrentLocale == "nb")">NB</MudButton>
+            <MudButton OnClick="@(() => SwitchLanguageAsync("en"))"
+                       Disabled="@(I18n.CurrentLocale == "en")">EN</MudButton>
+        </MudButtonGroup>
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="2" ClipMode="DrawerClipMode.Always">
+        <MudNavMenu>
+            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
+                @I18n.T("ui.nav.home")
+            </MudNavLink>
+            <MudDivider Class="my-2" />
+            <MudText Typo="Typo.caption" Class="px-4 py-1 mud-text-secondary">
+                @I18n.T("ui.nav.pages")
+            </MudText>
+            @foreach (var navPage in _navPages)
+            {
+                <MudNavLink Href="@($"/page/{navPage.Id}")" Icon="@Icons.Material.Filled.TableRows">
+                    @I18n.T(navPage.Title, navPage.Id)
+                </MudNavLink>
+            }
+        </MudNavMenu>
+    </MudDrawer>
+
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="py-4">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+    private IReadOnlyList<ClientPageDefinition> _navPages = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        Api.OnStateChanged += HandleStateChanged;
+        I18n.OnLocaleChanged += StateHasChanged;
+
+        if (Api.CurrentAuth is null)
+        {
+            await Api.DevLoginAsync();
+        }
+
+        await LoadNavigationAsync();
+    }
+
+    private async void HandleStateChanged()
+    {
+        await LoadNavigationAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadNavigationAsync()
+    {
+        if (Api.CurrentAuth is null) return;
+        var allPages = await Api.GetPagesAsync();
+        _navPages = allPages
+            .Where(p => string.Equals(p.Type, "list", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(p.Type, "worklist", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private async Task SwitchLanguageAsync(string locale)
+    {
+        await Api.SwitchLocaleAsync(locale);
+    }
+
+    public void Dispose()
+    {
+        Api.OnStateChanged -= HandleStateChanged;
+        I18n.OnLocaleChanged -= StateHasChanged;
+    }
+}
+

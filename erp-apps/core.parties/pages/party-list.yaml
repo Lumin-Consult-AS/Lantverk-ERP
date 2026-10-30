@@ -10,5 +10,6 @@ columns:
   - organizationNumber
   - email
   - phone
+  - status
   - isActive
 

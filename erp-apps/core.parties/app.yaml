@@ -8,6 +8,7 @@ sdk: ">=1.0.0 <2.0.0"
 enums:
   core.partytype: [organization, person]
   core.partyrole: [customer, supplier, both]
+  core.partystatus: [active, inactive, blocked]
   core.addresstype: [postal, delivery, invoice, visiting]
 
 objects:
@@ -57,6 +58,33 @@ objects:
         required: true
         default: true
         label: Aktiv
+      status:
+        type: enum
+        of: core.partystatus
+        required: true
+        default: active
+        label: Status
+    status:
+      field: status
+      initial: active
+      transitions:
+        deactivate:
+          from: active
+          to: inactive
+          permission: update
+        activate:
+          from: inactive
+          to: active
+          permission: update
+        block:
+          from: active
+          to: blocked
+          permission: update
+          locksRecord: true
+        unblock:
+          from: blocked
+          to: active
+          permission: update
     keys:
       - name: uk_party_number
         fields: [partyNumber]

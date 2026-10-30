@@ -1,0 +1,454 @@
+@inject ErpApiClient Api
+@inject I18nService I18n
+@inject NavigationManager Nav
+
+<MudPaper Elevation="2" Class="pa-4" data-page-id="@Page.Id" data-page-type="card">
+    <div class="d-flex flex-wrap align-center justify-space-between mb-4 gap-2">
+        <div class="d-flex align-center gap-2">
+            <MudButton Variant="Variant.Text"
+                       StartIcon="@Icons.Material.Filled.ArrowBack"
+                       OnClick="@NavigateBackToList"
+                       data-action="back-to-list">
+                @I18n.T("ui.action.backToList")
+            </MudButton>
+            <MudText Typo="Typo.h5" data-element="card-title">@HeaderTitle</MudText>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2">
+            @if (RecordId.HasValue)
+            {
+                @foreach (var action in GetAvailableActions())
+                {
+                    <MudButton Variant="Variant.Outlined"
+                               Color="@GetActionColor(action.Placement)"
+                               OnClick="@(() => ExecuteTransitionActionAsync(action))"
+                               data-transition="@action.Transition">
+                        @I18n.T(action.Label, action.Label)
+                    </MudButton>
+                }
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.Delete"
+                           OnClick="@DeleteCurrentRecordAsync"
+                           data-action="delete-record">
+                    @I18n.T("ui.action.delete")
+                </MudButton>
+            }
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="@SaveRecordAsync"
+                       data-action="save-record">
+                @I18n.T("ui.action.save")
+            </MudButton>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_statusBanner))
+    {
+        <MudAlert Severity="Severity.Success" Class="mb-3" ShowCloseIcon="true" CloseIconClicked="@(() => _statusBanner = null)">
+            @_statusBanner
+        </MudAlert>
+    }
+
+    @if (!string.IsNullOrEmpty(_errorBanner))
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-3" data-element="card-error">
+            @_errorBanner
+        </MudAlert>
+    }
+
+    <MudGrid>
+        @foreach (var group in EffectiveGroups)
+        {
+            <MudItem xs="12" md="6">
+                <MudCard Outlined="true" Class="mb-3">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.subtitle1"><b>@I18n.T(group.Label, group.Label)</b></MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        @foreach (var fieldKey in group.Fields)
+                        {
+                            var fieldDef = ResolveField(fieldKey);
+                            if (fieldDef is not null)
+                            {
+                                var exposed = fieldDef.GetExposedName(ObjectDefinition.OwnerApp);
+                                _validationErrors.TryGetValue(exposed, out var valErr);
+                                <DeclarativeFieldEditor Field="@fieldDef"
+                                                        ObjectOwnerApp="@ObjectDefinition.OwnerApp"
+                                                        RecordFields="@_fields"
+                                                        EnumValues="@GetEnumValues(fieldDef)"
+                                                        ValidationError="@valErr"
+                                                        OnValueChanged="@OnFieldChanged" />
+                            }
+                        }
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+
+    @if (RecordId.HasValue && Page.Tabs.Count > 0)
+    {
+        <MudDivider Class="my-4" />
+        @foreach (var tab in Page.Tabs)
+        {
+            var tabObjId = tab.Object ?? string.Empty;
+            _tabRecords.TryGetValue(tab.Label, out var subRecords);
+            _AllObjectsById.TryGetValue(tabObjId, out var subObjDef);
+
+            <MudCard Outlined="true" Class="mb-4" data-tab="@tab.Label" data-tab-object="@tabObjId">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">@I18n.T(tab.Label, tab.Label)</MudText>
+                    </CardHeaderContent>
+                    <CardHeaderActions>
+                        @if (subObjDef is not null)
+                        {
+                            <MudButton Size="Size.Small"
+                                       Variant="Variant.Filled"
+                                       Color="Color.Secondary"
+                                       StartIcon="@Icons.Material.Filled.Add"
+                                       OnClick="@(() => OpenSublistDialog(tab, subObjDef))"
+                                       data-action="add-subitem">
+                                @I18n.T("ui.action.addSubItem")
+                            </MudButton>
+                        }
+                    </CardHeaderActions>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (_activeDialogTabLabel == tab.Label && subObjDef is not null)
+                    {
+                        <DeclarativeDialogModal IsOpen="true"
+                                                Title="@($"{I18n.T("ui.action.addSubItem")} – {I18n.T(tab.Label, subObjDef.Label)}")"
+                                                ObjectDefinition="@subObjDef"
+                                                EnumsById="@EnumsById"
+                                                InitialFields="@_dialogInitialFields"
+                                                HiddenFieldNames="@_dialogHiddenFields"
+                                                OnSaved="@OnSublistRecordSavedAsync"
+                                                OnCancel="@CloseSublistDialog" />
+                    }
+
+                    <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+                        <thead>
+                            <tr>
+                                @foreach (var col in tab.Fields)
+                                {
+                                    <th>@I18n.T($"parties.fields.{col}", col)</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (subRecords is null || subRecords.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="@Math.Max(1, tab.Fields.Count)" class="text-center py-2">
+                                        @I18n.T("ui.status.emptyList")
+                                    </td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var sr in subRecords)
+                                {
+                                    <tr data-subrecord-id="@sr.Id">
+                                        @foreach (var col in tab.Fields)
+                                        {
+                                            <td>
+                                                @(sr.Fields.TryGetValue(col, out var sv) ? I18nService.UnwrapDisplayString(sv) : string.Empty)
+                                            </td>
+                                        }
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </MudCardContent>
+            </MudCard>
+        }
+    }
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public ClientPageDefinition Page { get; set; } = default!;
+    [Parameter, EditorRequired] public ClientObjectDefinition ObjectDefinition { get; set; } = default!;
+    [Parameter] public IReadOnlyDictionary<string, ClientObjectDefinition> AllObjectsById { get; set; } = new Dictionary<string, ClientObjectDefinition>();
+    [Parameter] public IReadOnlyDictionary<string, ClientEnumDefinition> EnumsById { get; set; } = new Dictionary<string, ClientEnumDefinition>();
+    [Parameter] public Guid? RecordId { get; set; }
+    [Parameter] public string? CompanionListPageId { get; set; }
+
+    private IReadOnlyDictionary<string, ClientObjectDefinition> _AllObjectsById => AllObjectsById;
+    private Dictionary<string, object?> _fields = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, string> _validationErrors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<ClientRecordData>> _tabRecords = new(StringComparer.OrdinalIgnoreCase);
+    private long _rowVersion = 1;
+    private string? _statusBanner;
+    private string? _errorBanner;
+
+    private string? _activeDialogTabLabel;
+    private Dictionary<string, object?>? _dialogInitialFields;
+    private HashSet<string>? _dialogHiddenFields;
+
+    private string HeaderTitle => RecordId.HasValue
+        ? I18n.FormatRecordTitle(Page.Title, _fields, ObjectDefinition.Label)
+        : $"{I18n.T("ui.action.new")} – {ObjectDefinition.Label}";
+
+    private IReadOnlyList<ClientPageGroup> EffectiveGroups =>
+        Page.Groups.Count > 0
+            ? Page.Groups
+            :
+            [
+                new ClientPageGroup
+                {
+                    Label = "Generelt",
+                    Fields = ObjectDefinition.Fields.Select(f => f.GetExposedName(ObjectDefinition.OwnerApp)).ToList()
+                }
+            ];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadRecordAndTabsAsync();
+    }
+
+    public async Task LoadRecordAndTabsAsync()
+    {
+        _errorBanner = null;
+        _validationErrors.Clear();
+
+        if (RecordId.HasValue)
+        {
+            var record = await Api.GetRecordAsync(ObjectDefinition.Id, RecordId.Value);
+            if (record is null)
+            {
+                _errorBanner = $"Fant ikke post '{RecordId.Value}'.";
+                return;
+            }
+
+            _rowVersion = record.RowVersion;
+            _fields = new Dictionary<string, object?>(record.Fields, StringComparer.OrdinalIgnoreCase);
+            await LoadTabSublistsAsync();
+        }
+        else
+        {
+            _rowVersion = 1;
+            _fields = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in ObjectDefinition.Fields)
+            {
+                if (f.DefaultValue is not null)
+                {
+                    _fields[f.GetExposedName(ObjectDefinition.OwnerApp)] = I18nService.UnwrapDisplayString(f.DefaultValue);
+                }
+            }
+        }
+    }
+
+    private async Task LoadTabSublistsAsync()
+    {
+        _tabRecords.Clear();
+        if (!RecordId.HasValue) return;
+
+        foreach (var tab in Page.Tabs)
+        {
+            if (string.IsNullOrWhiteSpace(tab.Object)) continue;
+            var filterClause = BuildTabFilterExpression(tab, RecordId.Value);
+            var rows = await Api.QueryRecordsAsync(tab.Object, filter: filterClause);
+            _tabRecords[tab.Label] = rows.ToList();
+        }
+    }
+
+    private static string? BuildTabFilterExpression(ClientPageTab tab, Guid parentId)
+    {
+        if (tab.Filter is null || tab.Filter.Count == 0)
+        {
+            return null;
+        }
+
+        var parts = new List<string>();
+        foreach (var (key, rawVal) in tab.Filter)
+        {
+            var valStr = I18nService.UnwrapDisplayString(rawVal)
+                .Replace("{id}", parentId.ToString("D"), StringComparison.OrdinalIgnoreCase);
+            parts.Add($"{key} eq '{valStr}'");
+        }
+
+        return string.Join(" and ", parts);
+    }
+
+    private void OnFieldChanged()
+    {
+        _validationErrors = ClientFieldValidator.ValidateRecord(ObjectDefinition, _fields, I18n);
+    }
+
+    public async Task SaveRecordAsync()
+    {
+        _errorBanner = null;
+        _statusBanner = null;
+        _validationErrors = ClientFieldValidator.ValidateRecord(ObjectDefinition, _fields, I18n);
+        if (_validationErrors.Count > 0)
+        {
+            return;
+        }
+
+        try
+        {
+            if (RecordId.HasValue)
+            {
+                var updated = await Api.UpdateRecordAsync(ObjectDefinition.Id, RecordId.Value, _rowVersion, _fields);
+                _rowVersion = updated.RowVersion;
+                _fields = new Dictionary<string, object?>(updated.Fields, StringComparer.OrdinalIgnoreCase);
+                _statusBanner = I18n.T("ui.status.saved");
+            }
+            else
+            {
+                var created = await Api.CreateRecordAsync(ObjectDefinition.Id, _fields);
+                RecordId = created.Id;
+                _rowVersion = created.RowVersion;
+                _fields = new Dictionary<string, object?>(created.Fields, StringComparer.OrdinalIgnoreCase);
+                _statusBanner = I18n.T("ui.status.saved");
+                await LoadTabSublistsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorBanner = ex.Message;
+        }
+    }
+
+    public async Task ExecuteTransitionActionAsync(ClientPageAction action)
+    {
+        if (!RecordId.HasValue || string.IsNullOrWhiteSpace(action.Transition)) return;
+        _errorBanner = null;
+        _statusBanner = null;
+
+        try
+        {
+            var updated = await Api.ExecuteTransitionAsync(
+                ObjectDefinition.Id,
+                RecordId.Value,
+                action.Transition,
+                _rowVersion);
+            _rowVersion = updated.RowVersion;
+            _fields = new Dictionary<string, object?>(updated.Fields, StringComparer.OrdinalIgnoreCase);
+            _statusBanner = I18n.T("ui.status.saved");
+        }
+        catch (Exception ex)
+        {
+            _errorBanner = ex.Message;
+        }
+    }
+
+    private async Task DeleteCurrentRecordAsync()
+    {
+        if (!RecordId.HasValue) return;
+        _errorBanner = null;
+        try
+        {
+            await Api.DeleteRecordAsync(ObjectDefinition.Id, RecordId.Value, _rowVersion);
+            NavigateBackToList();
+        }
+        catch (Exception ex)
+        {
+            _errorBanner = ex.Message;
+        }
+    }
+
+    private void OpenSublistDialog(ClientPageTab tab, ClientObjectDefinition subObjDef)
+    {
+        if (!RecordId.HasValue) return;
+        _activeDialogTabLabel = tab.Label;
+        _dialogInitialFields = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        _dialogHiddenFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (tab.Filter is not null)
+        {
+            foreach (var (k, v) in tab.Filter)
+            {
+                var resolved = I18nService.UnwrapDisplayString(v)
+                    .Replace("{id}", RecordId.Value.ToString("D"), StringComparison.OrdinalIgnoreCase);
+                _dialogInitialFields[k] = resolved;
+                _dialogHiddenFields.Add(k);
+            }
+        }
+    }
+
+    private void CloseSublistDialog()
+    {
+        _activeDialogTabLabel = null;
+        _dialogInitialFields = null;
+        _dialogHiddenFields = null;
+    }
+
+    private async Task OnSublistRecordSavedAsync(ClientRecordData _)
+    {
+        CloseSublistDialog();
+        await LoadTabSublistsAsync();
+    }
+
+    private IEnumerable<ClientPageAction> GetAvailableActions()
+    {
+        if (ObjectDefinition.Status is null)
+        {
+            return Page.Actions;
+        }
+
+        var statusField = string.IsNullOrWhiteSpace(ObjectDefinition.Status.Field) ? "status" : ObjectDefinition.Status.Field;
+        _fields.TryGetValue(statusField, out var currentStatusObj);
+        var currentStatus = I18nService.UnwrapDisplayString(currentStatusObj);
+
+        return Page.Actions.Where(a =>
+        {
+            if (string.IsNullOrWhiteSpace(a.Transition)) return true;
+            if (!ObjectDefinition.Status.Transitions.TryGetValue(a.Transition, out var tDef)) return false;
+            return string.IsNullOrWhiteSpace(tDef.From)
+                   || string.Equals(tDef.From, currentStatus, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    private ClientFieldDefinition? ResolveField(string fieldKey)
+    {
+        var shortKey = fieldKey.Contains('.') ? fieldKey[(fieldKey.LastIndexOf('.') + 1)..] : fieldKey;
+        return ObjectDefinition.Fields.FirstOrDefault(f =>
+            string.Equals(f.GetExposedName(ObjectDefinition.OwnerApp), fieldKey, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(f.Name, fieldKey, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(f.Name, shortKey, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private IReadOnlyList<string> GetEnumValues(ClientFieldDefinition field)
+    {
+        if (!string.IsNullOrWhiteSpace(field.EnumType)
+            && EnumsById.TryGetValue(field.EnumType, out var enumDef))
+        {
+            return enumDef.Values;
+        }
+        return [];
+    }
+
+    private static Color GetActionColor(string? placement) => placement?.ToLowerInvariant() switch
+    {
+        "danger" or "error" => Color.Error,
+        "secondary" => Color.Secondary,
+        _ => Color.Primary
+    };
+
+    private void NavigateBackToList()
+    {
+        if (!string.IsNullOrWhiteSpace(CompanionListPageId))
+        {
+            Nav.NavigateTo($"/page/{CompanionListPageId}");
+            return;
+        }
+
+        if (Page.Id.EndsWith("-card", StringComparison.OrdinalIgnoreCase))
+        {
+            Nav.NavigateTo($"/page/{Page.Id[..^5]}-list");
+            return;
+        }
+
+        Nav.NavigateTo("/");
+    }
+}
+

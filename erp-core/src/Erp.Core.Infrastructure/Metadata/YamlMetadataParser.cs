@@ -228,6 +228,37 @@ public static class YamlMetadataParser
             }
         }
 
+        if (TryGetMap(node, "status", out var statusMap))
+        {
+            var statusDef = new ObjectStatusMachineDefinition
+            {
+                Field = GetString(statusMap, "field") ?? "status",
+                Initial = GetString(statusMap, "initial") ?? string.Empty
+            };
+
+            if (TryGetMap(statusMap, "transitions", out var transitionsMap))
+            {
+                foreach (var kvp in transitionsMap)
+                {
+                    var transName = kvp.Key?.ToString() ?? string.Empty;
+                    if (kvp.Value is IDictionary<object, object> tMap)
+                    {
+                        statusDef.Transitions[transName] = new StatusTransitionDefinition
+                        {
+                            Name = transName,
+                            From = GetString(tMap, "from") ?? string.Empty,
+                            To = GetString(tMap, "to") ?? string.Empty,
+                            Permission = GetString(tMap, "permission"),
+                            Workflow = GetString(tMap, "workflow"),
+                            LocksRecord = GetBool(tMap, "locksRecord") ?? false
+                        };
+                    }
+                }
+            }
+
+            obj.Status = statusDef;
+        }
+
         return obj;
     }
 
