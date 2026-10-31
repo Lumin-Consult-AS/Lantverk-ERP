@@ -204,6 +204,27 @@ public static class MetadataDdlGenerator
                 FOR EACH ROW EXECUTE FUNCTION core.capture_change_log();
             """);
 
+        // Records in an immutable status can neither be changed nor deleted, by anyone (ADR-0020).
+        var immutable = objectDef.Status?.ImmutableIn;
+        var statusColumn = objectDef.Fields
+            .FirstOrDefault(f => string.Equals(f.Name, objectDef.Status?.Field, StringComparison.OrdinalIgnoreCase))
+            ?.GetColumnName(objectDef.OwnerApp);
+        if (immutable is { Count: > 0 } && statusColumn is not null)
+        {
+            var states = string.Join(",", immutable).Replace("'", "''", StringComparison.Ordinal);
+            transactional.Add(
+                $"""
+                DROP TRIGGER IF EXISTS "trg_{table}_immutable" ON "{schema}"."{table}";
+                CREATE TRIGGER "trg_{table}_immutable"
+                    BEFORE UPDATE OR DELETE ON "{schema}"."{table}"
+                    FOR EACH ROW EXECUTE FUNCTION core.prevent_immutable_change('{statusColumn}', '{states}');
+                """);
+        }
+        else
+        {
+            transactional.Add($"""DROP TRIGGER IF EXISTS "trg_{table}_immutable" ON "{schema}"."{table}";""");
+        }
+
         return new MetadataDdlPlan(transactional, concurrentIndexes);
     }
 

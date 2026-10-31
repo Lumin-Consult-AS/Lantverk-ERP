@@ -10,6 +10,15 @@ namespace Erp.Core.Api.Endpoints;
 
 public sealed record YamlMetadataRequest(string Yaml);
 
+/// <summary>One calculated column: <c>function</c> is count, sum, avg, min or max; <c>as</c> names the result column.</summary>
+public sealed record AggregateMeasureRequest(string? Function, string? Field, string? As);
+
+public sealed record AggregateRequest(
+    IReadOnlyList<AggregateMeasureRequest>? Measures,
+    string? Filter = null,
+    IReadOnlyList<string>? GroupBy = null,
+    int? Top = null);
+
 public static class MetadataAndDataEndpoints
 {
     public static void MapMetadataAndDataEndpoints(this IEndpointRouteBuilder v1)
@@ -125,6 +134,27 @@ public static class MetadataAndDataEndpoints
 
                 var records = await dataService.QueryAsync(objectId, query, companyId, ct);
                 return Results.Ok(records);
+            });
+        });
+
+        // Summaries (ADR-0016): sum, count, avg, min, max with grouping. Same permission, company and tenant rules as a query.
+        v1.MapPost("/{company}/{objectId}/aggregate", async (
+            string company,
+            string objectId,
+            AggregateRequest request,
+            ITenantContext tenantContext,
+            RecordDataService dataService,
+            CancellationToken ct) =>
+        {
+            var companyId = ResolveCompanyId(company, tenantContext);
+            return await ExecuteDataActionAsync(async () =>
+            {
+                var query = new AggregateQuery(
+                    (request.Measures ?? []).Select(m => new AggregateMeasure(m.Function ?? string.Empty, m.Field, m.As ?? string.Empty)).ToList(),
+                    FilterExpressionParser.Parse(request.Filter),
+                    request.GroupBy,
+                    request.Top ?? 1000);
+                return Results.Ok(new { rows = await dataService.AggregateAsync(objectId, query, companyId, ct) });
             });
         });
 

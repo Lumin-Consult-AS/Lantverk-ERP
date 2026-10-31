@@ -17,6 +17,13 @@ public sealed class ObjectStatusMachineDefinition
 {
     public string Field { get; set; } = "status";
     public string Initial { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Statuses in which the record can no longer be changed or deleted (for example <c>posted</c>). Enforced by a database
+    /// trigger, so it holds for every access path; corrections are made with a new record, not by editing.
+    /// </summary>
+    public List<string> ImmutableIn { get; set; } = [];
+
     public Dictionary<string, StatusTransitionDefinition> Transitions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 

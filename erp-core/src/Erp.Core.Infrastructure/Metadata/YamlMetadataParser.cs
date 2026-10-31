@@ -236,6 +236,11 @@ public static class YamlMetadataParser
                 Initial = GetString(statusMap, "initial") ?? string.Empty
             };
 
+            if (statusMap.TryGetValue("immutableIn", out var immutableRaw) && immutableRaw is IEnumerable<object> immutableList)
+            {
+                statusDef.ImmutableIn.AddRange(immutableList.Select(v => v?.ToString() ?? string.Empty).Where(v => v.Length > 0));
+            }
+
             if (TryGetMap(statusMap, "transitions", out var transitionsMap))
             {
                 foreach (var kvp in transitionsMap)
@@ -306,6 +311,7 @@ public static class YamlMetadataParser
                 ReadOnlyWhen = fNode.TryGetValue("readOnlyWhen", out var roWhen) ? ParseWhenRule(roWhen) : null,
                 VisibleWhen = fNode.TryGetValue("visibleWhen", out var visWhen) ? ParseWhenRule(visWhen) : null,
                 EditableInWorkflow = GetBool(fNode, "editableInWorkflow") ?? false,
+                NumberSeries = ParseNumberSeries(fieldName, fieldType, fNode),
                 TargetObject = GetString(fNode, "to") ?? GetString(fNode, "targetObject"),
                 OnDelete = onDelete,
                 EnumType = GetString(fNode, "of") ?? GetString(fNode, "enumType")
@@ -313,6 +319,40 @@ public static class YamlMetadataParser
         }
 
         return fields;
+    }
+
+    private static NumberSeriesDefinition? ParseNumberSeries(string fieldName, FieldType fieldType, IDictionary<object, object> fNode)
+    {
+        if (!fNode.TryGetValue("numberSeries", out var raw) || raw is null)
+        {
+            return null;
+        }
+
+        if (fieldType != FieldType.String)
+        {
+            throw new MetadataValidationException($"Field '{fieldName}' has a numberSeries and must be of type string.");
+        }
+
+        if (raw is not IDictionary<object, object> map)
+        {
+            // "numberSeries: true" is a plain counter without prefix
+            return raw.ToString()?.Equals("true", StringComparison.OrdinalIgnoreCase) == true
+                ? new NumberSeriesDefinition()
+                : throw new MetadataValidationException($"numberSeries on field '{fieldName}' must be true or a mapping.");
+        }
+
+        var padding = GetInt(map, "padding") ?? 0;
+        if (padding is < 0 or > 18)
+        {
+            throw new MetadataValidationException($"numberSeries.padding on field '{fieldName}' must be between 0 and 18.");
+        }
+
+        return new NumberSeriesDefinition
+        {
+            Prefix = GetString(map, "prefix") ?? string.Empty,
+            Padding = padding,
+            PerYear = GetBool(map, "perYear") ?? false
+        };
     }
 
     public static FilterNode? ParseWhenRule(object? rawNode)
