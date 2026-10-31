@@ -21,7 +21,9 @@ public sealed class AppInstallationService(
     IAppPackageStorage packageStorage,
     ITenantContext tenantContext,
     KubernetesAppOrchestrator? appOrchestrator = null,
-    WorkflowStore? workflowStore = null)
+    WorkflowStore? workflowStore = null,
+    AppMigrationService? migrations = null,
+    AppRetentionService? retention = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -31,7 +33,7 @@ public sealed class AppInstallationService(
         WriteIndented = false
     };
 
-    public async Task<InstalledApp> InstallPackageAsync(
+    public async Task<AppInstallResult> InstallPackageAsync(
         byte[] zipBytes,
         string? signingKey = null,
         CancellationToken cancellationToken = default)
@@ -49,6 +51,37 @@ public sealed class AppInstallationService(
         var installedApps = await dbContext.InstalledApps
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+
+        var existingApp = installedApps.FirstOrDefault(a => string.Equals(a.AppId, manifest.Id, StringComparison.OrdinalIgnoreCase));
+
+        // The same package again changes nothing. Compared by content: a rebuilt zip of identical files has another hash.
+        if (existingApp is not null && SameManifest(existingApp.ManifestJson, manifest))
+        {
+            return new AppInstallResult(existingApp, "unchanged", existingApp.Version, [], [], null);
+        }
+
+        AppManifest? installedManifest = null;
+        IReadOnlyList<SchemaChange> changes = [];
+        if (existingApp is not null)
+        {
+            // 2b. Upgrade rules (ADR-0013): newer version, breaking changes only in a new major (with a migration),
+            //     and dependent apps must support a new major.
+            installedManifest = JsonSerializer.Deserialize<AppManifest>(existingApp.ManifestJson, JsonOptions)
+                ?? throw new InvalidOperationException($"The stored manifest of '{existingApp.AppId}' is unreadable.");
+            changes = AppUpgradeAnalyzer.Analyze(installedManifest, manifest);
+
+            var dependents = installedApps
+                .Where(a => !string.Equals(a.AppId, manifest.Id, StringComparison.OrdinalIgnoreCase))
+                .Select(a => new AppUpgradeValidator.InstalledDependent(
+                    a.AppId, a.Version, JsonSerializer.Deserialize<AppManifest>(a.ManifestJson, JsonOptions)!))
+                .ToList();
+
+            var upgradeErrors = AppUpgradeValidator.Validate(installedManifest, manifest, changes, dependents);
+            if (upgradeErrors.Count > 0)
+            {
+                throw new AppUpgradeException(upgradeErrors);
+            }
+        }
 
         var installedVersions = installedApps
             .Where(a => !string.Equals(a.AppId, manifest.Id, StringComparison.OrdinalIgnoreCase))
@@ -81,8 +114,14 @@ public sealed class AppInstallationService(
             verified.ZipBytes,
             cancellationToken);
 
-        // 5. Provision schemas, tables, columns, indexes, RLS, and audit triggers
-        await metadataRegistry.ApplyBundleAsync(manifest.Metadata, cancellationToken);
+        var isUpgrade = existingApp is not null && installedManifest is not null;
+
+        // 5. Provision schemas, tables, columns, indexes, RLS, and audit triggers. During an upgrade the metadata first
+        //    holds old and new together, so a data migration can read what is being removed while it writes what is new.
+        var (union, differs) = isUpgrade
+            ? AppMetadataUnion.Build(installedManifest!.Metadata, manifest.Metadata, JsonOptions)
+            : (manifest.Metadata, false);
+        await metadataRegistry.ApplyBundleAsync(union, cancellationToken);
 
         // 5b. If the app defines a container runtime, provision/ensure shared Deployment and NetworkPolicy
         if (!manifest.IsDeclarative && manifest.Runtime is not null)
@@ -90,13 +129,43 @@ public sealed class AppInstallationService(
             appOrchestrator?.EnsureContainerRunning(manifest);
         }
 
+        // 5c. Data migrations, per tenant, with a progress log. The installed version stays the old one until they have
+        //     completed, so a failed upgrade can simply be run again and resumes from its last checkpoint.
+        IReadOnlyList<MigrationRunInfo> migrationRuns = [];
+        AppArchiveInfo? upgradeArchive = null;
+        if (isUpgrade)
+        {
+            if (migrations is not null)
+            {
+                migrationRuns = await migrations.RunAsync(manifest, existingApp!.Version, cancellationToken);
+            }
+
+            // Now what the new version no longer declares can go: fields become orphaned columns, removed objects are
+            // archived. Nothing is deleted from the database here.
+            var dropAfter = retention?.PurgeDate ?? DateTimeOffset.UtcNow.AddDays(30);
+            var removedObjects = await metadataRegistry.ReconcileOwnedAsync(manifest.Id, manifest.Metadata, dropAfter, cancellationToken);
+            if (differs)
+            {
+                await metadataRegistry.ApplyBundleAsync(manifest.Metadata, cancellationToken);
+            }
+
+            if (retention is not null)
+            {
+                upgradeArchive = await retention.ArchiveAsync(manifest.Id, existingApp!.Version, removedObjects, "upgrade", cancellationToken);
+            }
+        }
+        else if (retention is not null)
+        {
+            // Reinstalling within the grace period brings the archived data back.
+            await retention.RestoreAsync(manifest.Id, cancellationToken);
+        }
+
         // 6. Upsert InstalledApp record
-        var existingApp = await dbContext.InstalledApps
+        var trackedApp = await dbContext.InstalledApps
             .FirstOrDefaultAsync(a => a.AppId == manifest.Id, cancellationToken);
 
-        var isUpgrade = existingApp is not null;
         InstalledApp appRecord;
-        if (existingApp is null)
+        if (trackedApp is null)
         {
             appRecord = new InstalledApp
             {
@@ -118,18 +187,18 @@ public sealed class AppInstallationService(
         }
         else
         {
-            existingApp.Version = manifest.Version;
-            existingApp.Name = manifest.Name;
-            existingApp.Publisher = manifest.Publisher;
-            existingApp.IsDeclarative = manifest.IsDeclarative;
-            existingApp.ContainerImage = manifest.Runtime?.Image;
-            existingApp.PackageSha256 = verified.PackageSha256;
-            existingApp.PackageStorageKey = storageKey;
-            existingApp.ManifestJson = JsonSerializer.Serialize(manifest, JsonOptions);
-            existingApp.PagesJson = JsonSerializer.Serialize(manifest.Pages, JsonOptions);
-            existingApp.PermissionSetsJson = JsonSerializer.Serialize(manifest.PermissionSets, JsonOptions);
-            existingApp.TranslationsJson = JsonSerializer.Serialize(manifest.Translations, JsonOptions);
-            appRecord = existingApp;
+            trackedApp.Version = manifest.Version;
+            trackedApp.Name = manifest.Name;
+            trackedApp.Publisher = manifest.Publisher;
+            trackedApp.IsDeclarative = manifest.IsDeclarative;
+            trackedApp.ContainerImage = manifest.Runtime?.Image;
+            trackedApp.PackageSha256 = verified.PackageSha256;
+            trackedApp.PackageStorageKey = storageKey;
+            trackedApp.ManifestJson = JsonSerializer.Serialize(manifest, JsonOptions);
+            trackedApp.PagesJson = JsonSerializer.Serialize(manifest.Pages, JsonOptions);
+            trackedApp.PermissionSetsJson = JsonSerializer.Serialize(manifest.PermissionSets, JsonOptions);
+            trackedApp.TranslationsJson = JsonSerializer.Serialize(manifest.Translations, JsonOptions);
+            appRecord = trackedApp;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -147,11 +216,28 @@ public sealed class AppInstallationService(
             triggerAppVersion: manifest.Version,
             cancellationToken);
 
-        return appRecord;
+        return new AppInstallResult(
+            appRecord,
+            isUpgrade ? "upgraded" : "installed",
+            existingApp?.Version,
+            changes,
+            migrationRuns,
+            upgradeArchive);
     }
 
-    public async Task<MetadataSnapshot> UninstallAppAsync(
+    /// <summary>The stored manifest is a jsonb column, which does not keep key order or spacing; compare the content.</summary>
+    private static bool SameManifest(string storedJson, AppManifest manifest) =>
+        System.Text.Json.Nodes.JsonNode.DeepEquals(
+            System.Text.Json.Nodes.JsonNode.Parse(storedJson),
+            System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(manifest, JsonOptions)));
+
+    /// <summary>
+    /// Uninstalls an app. Its objects' data is archived, not deleted: it is kept for the grace period and restored if the
+    /// app is installed again. <paramref name="purgeNow"/> deletes the tenant's data at once instead.
+    /// </summary>
+    public async Task<AppUninstallResult> UninstallAppAsync(
         string appId,
+        bool purgeNow = false,
         CancellationToken cancellationToken = default)
     {
         var installedApp = await dbContext.InstalledApps
@@ -175,10 +261,11 @@ public sealed class AppInstallationService(
             }
         }
 
-        // Remove metadata items owned by this app (physical DB tables/columns remain as orphaned during grace period)
+        // Remove metadata items owned by this app (the physical tables and columns remain; the data is archived below)
         var ownedItems = await dbContext.MetadataItems
             .Where(m => m.OwnerApp == appId)
             .ToListAsync(cancellationToken);
+        var ownedObjectIds = ownedItems.Where(m => m.Kind == "object").Select(m => m.ItemId).ToList();
         dbContext.MetadataItems.RemoveRange(ownedItems);
 
         // Also remove any extension fields owned by this app on other apps' objects
@@ -187,6 +274,7 @@ public sealed class AppInstallationService(
             .ToListAsync(cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
+        var dropAfter = retention?.PurgeDate ?? now.AddDays(30);
         foreach (var objItem in otherObjectItems)
         {
             var objDef = JsonSerializer.Deserialize<ObjectDefinition>(objItem.DefinitionJson, JsonOptions);
@@ -211,7 +299,7 @@ public sealed class AppInstallationService(
                             FormerOwnerApp = appId,
                             Type = rf.Type,
                             OrphanedAt = now,
-                            DropAfter = now.AddDays(30)
+                            DropAfter = dropAfter
                         });
                     }
 
@@ -231,12 +319,23 @@ public sealed class AppInstallationService(
             await workflowStore.RemoveAppDefaultsAsync(appId, cancellationToken);
         }
 
+        AppArchiveInfo? archive = null;
+        if (retention is not null)
+        {
+            archive = await retention.ArchiveAsync(appId, uninstalledVersion, ownedObjectIds, "uninstall", cancellationToken);
+            if (archive is not null && purgeNow)
+            {
+                archive = await retention.PurgeAsync(archive.Id, cancellationToken);
+            }
+        }
+
         // Capture immutable metadata snapshot after uninstallation
-        return await CaptureMetadataSnapshotAsync(
+        var snapshot = await CaptureMetadataSnapshotAsync(
             triggerAction: "uninstall",
             triggerAppId: appId,
             triggerAppVersion: uninstalledVersion,
             cancellationToken);
+        return new AppUninstallResult(snapshot, archive);
     }
 
     public async Task<IReadOnlyList<InstalledApp>> GetInstalledAppsAsync(CancellationToken cancellationToken = default)
@@ -348,6 +447,31 @@ public sealed class AppInstallationService(
             .AsNoTracking()
             .OrderBy(s => s.SnapshotNumber)
             .ToListAsync(cancellationToken);
+
+    public async Task<MetadataSnapshot?> GetSnapshotAsync(int snapshotNumber, CancellationToken cancellationToken = default)
+        => await dbContext.MetadataSnapshots
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.SnapshotNumber == snapshotNumber, cancellationToken);
+
+    /// <summary>The snapshot that applied at the given time: the newest one captured at or before it ("what did the schema look like then").</summary>
+    public async Task<MetadataSnapshot?> GetSnapshotAtAsync(DateTimeOffset at, CancellationToken cancellationToken = default)
+        => await dbContext.MetadataSnapshots
+            .AsNoTracking()
+            .Where(s => s.CreatedAt <= at)
+            .OrderByDescending(s => s.SnapshotNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<SchemaChange>> DiffSnapshotsAsync(int fromNumber, int toNumber, CancellationToken cancellationToken = default)
+    {
+        var from = await GetSnapshotAsync(fromNumber, cancellationToken)
+            ?? throw new KeyNotFoundException($"Snapshot {fromNumber} was not found.");
+        var to = await GetSnapshotAsync(toNumber, cancellationToken)
+            ?? throw new KeyNotFoundException($"Snapshot {toNumber} was not found.");
+
+        return SnapshotDiff.Compute(
+            JsonSerializer.Deserialize<TenantMetadataSnapshotPayload>(from.SnapshotJson, JsonOptions)!,
+            JsonSerializer.Deserialize<TenantMetadataSnapshotPayload>(to.SnapshotJson, JsonOptions)!);
+    }
 
     private async Task<MetadataSnapshot> CaptureMetadataSnapshotAsync(
         string triggerAction,
@@ -467,3 +591,14 @@ public sealed class AppInstallationService(
         }
     }
 }
+
+/// <summary>What an install or upgrade did. <c>Outcome</c> is installed, upgraded or unchanged (the same package again).</summary>
+public sealed record AppInstallResult(
+    InstalledApp App,
+    string Outcome,
+    string? FromVersion,
+    IReadOnlyList<SchemaChange> Changes,
+    IReadOnlyList<MigrationRunInfo> Migrations,
+    AppArchiveInfo? Archive);
+
+public sealed record AppUninstallResult(MetadataSnapshot Snapshot, AppArchiveInfo? Archive);

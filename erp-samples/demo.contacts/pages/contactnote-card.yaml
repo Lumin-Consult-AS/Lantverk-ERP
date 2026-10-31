@@ -7,6 +7,7 @@ groups:
     fields:
       - party
       - followUp
+      - priority
   - label: contacts.card.note
     fields:
       - text

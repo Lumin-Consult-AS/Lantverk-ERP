@@ -42,7 +42,7 @@ public sealed class AppHostAndSdkTests(PostgresDatabaseFixture fixture)
         var orchestrator = coreFactory.Services.GetRequiredService<KubernetesAppOrchestrator>();
         orchestrator.RegisterEndpoint(
             "demo.contacts",
-            "1.0.0",
+            "1.1.0",
             "http://demo-contacts-container:50051",
             () => contactsHost.GetTestServer().CreateHandler());
 
@@ -58,9 +58,9 @@ public sealed class AppHostAndSdkTests(PostgresDatabaseFixture fixture)
         try
         {
             // 1. Verify Kubernetes Deployment and NetworkPolicy were generated from runtime + egress whitelist
-            var deploymentSpec = orchestrator.GetDeploymentSpec("demo.contacts", "1.0.0");
+            var deploymentSpec = orchestrator.GetDeploymentSpec("demo.contacts", "1.1.0");
             Assert.NotNull(deploymentSpec);
-            Assert.Equal("ghcr.io/partner/demo-contacts:1.0.0", deploymentSpec.Image);
+            Assert.Equal("ghcr.io/partner/demo-contacts:1.1.0", deploymentSpec.Image);
             Assert.Equal("250m", deploymentSpec.CpuLimit);
             Assert.Equal("256Mi", deploymentSpec.MemoryLimit);
             Assert.Contains("api.hubspot.com:443", deploymentSpec.AllowedEgress);
@@ -154,7 +154,7 @@ public sealed class AppHostAndSdkTests(PostgresDatabaseFixture fixture)
         }
         finally
         {
-            orchestrator.UnregisterEndpoint("demo.contacts", "1.0.0");
+            orchestrator.UnregisterEndpoint("demo.contacts", "1.1.0");
             await api.UninstallAppAsync("demo.contacts");
             await api.UninstallAppAsync("core.parties");
         }
@@ -180,7 +180,7 @@ public sealed class AppHostAndSdkTests(PostgresDatabaseFixture fixture)
 
         orchestrator.RegisterEndpoint(
             "demo.contacts",
-            "1.0.0",
+            "1.1.0",
             "http://test-app-container:50051",
             () => slowAndMutatingHost.GetTestServer().CreateHandler());
 
@@ -239,7 +239,7 @@ public sealed class AppHostAndSdkTests(PostgresDatabaseFixture fixture)
         finally
         {
             hostOptions.SynchronousHookTimeout = TimeSpan.FromSeconds(5);
-            orchestrator.UnregisterEndpoint("demo.contacts", "1.0.0");
+            orchestrator.UnregisterEndpoint("demo.contacts", "1.1.0");
             await api.UninstallAppAsync("demo.contacts");
             await api.UninstallAppAsync("core.parties");
         }

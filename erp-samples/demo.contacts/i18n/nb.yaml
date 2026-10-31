@@ -9,6 +9,7 @@ contacts:
   fields:
     party: Part
     text: Notattekst
+    priority: Prioritet
     followUp: Oppfølgingsdato
     preferredChannel: Foretrukket kanal
 

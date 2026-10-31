@@ -520,13 +520,61 @@ public sealed class ErpAppGrpcService<TApp>(
         };
     }
 
-    public override Task<MigrationRunResponse> RunMigration(MigrationRunRequest request, ServerCallContext context)
+    public override async Task<MigrationRunResponse> RunMigration(MigrationRunRequest request, ServerCallContext context)
     {
-        return Task.FromResult(new MigrationRunResponse
+        var method = typeof(TApp).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .FirstOrDefault(m => m.GetCustomAttributes<MigrationAttribute>()
+                .Any(a => string.Equals(a.Name, request.MigrationClass, StringComparison.OrdinalIgnoreCase)))
+            ?? throw new RpcException(new Status(
+                StatusCode.NotFound,
+                $"The app has no migration '{request.MigrationClass}'. Mark the method with [Migration(\"{request.MigrationClass}\")]."));
+
+        var appCtx = BuildAppContext(request.Context, context);
+        var state = new MigrationState(
+            request.FromVersion,
+            request.ToVersion,
+            string.IsNullOrEmpty(request.Checkpoint) ? null : request.Checkpoint);
+
+        var args = method.GetParameters().Select(p =>
+            p.ParameterType == typeof(AppContext) ? (object?)appCtx
+            : p.ParameterType == typeof(MigrationState) ? state
+            : p.ParameterType == typeof(CancellationToken) ? context.CancellationToken
+            : throw new RpcException(new Status(
+                StatusCode.FailedPrecondition,
+                $"Migration '{request.MigrationClass}' has an unsupported parameter '{p.Name}' of type {p.ParameterType.Name}."))).ToArray();
+
+        MigrationStep step;
+        try
         {
-            Completed = true,
-            RecordsProcessed = 0
-        });
+            var result = method.Invoke(appInstance, args);
+            step = result switch
+            {
+                Task<MigrationStep> typed => await typed.WaitAsync(context.CancellationToken),
+                MigrationStep direct => direct,
+                Task plain => await CompleteAsync(plain, context.CancellationToken),
+                _ => MigrationStep.Done()
+            };
+        }
+        catch (Exception ex) when (ex is not RpcException and not OperationCanceledException)
+        {
+            // Carry the app's own error text back to the core, so a failed migration says why it failed.
+            var cause = ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
+            throw new RpcException(new Status(StatusCode.Internal, $"{cause.GetType().Name}: {cause.Message}"));
+        }
+
+        return new MigrationRunResponse
+        {
+            Completed = step.Completed,
+            RecordsProcessed = step.RecordsProcessed,
+            Checkpoint = step.Checkpoint ?? string.Empty
+        };
+    }
+
+    /// <summary>A migration written as a plain <c>Task</c> has finished when the task has; errors propagate.</summary>
+    private static async Task<MigrationStep> CompleteAsync(Task task, CancellationToken cancellationToken)
+    {
+        await task.WaitAsync(cancellationToken);
+        return MigrationStep.Done();
     }
 
     private AppContext BuildAppContext(CallContextProto? proto, ServerCallContext callContext)

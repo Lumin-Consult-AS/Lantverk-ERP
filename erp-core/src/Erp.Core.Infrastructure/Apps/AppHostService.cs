@@ -19,6 +19,9 @@ public sealed class AppHostOptions
     /// </summary>
     public TimeSpan SynchronousHookTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>Deadline for one step (batch) of a data migration; much longer than a synchronous hook.</summary>
+    public TimeSpan MigrationStepTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
     /// <summary>
     /// Optional Core callback endpoint URL sent via <c>x-erp-core-endpoint</c> header.
     /// </summary>
@@ -199,6 +202,49 @@ public sealed class AppHostService(
         {
             throw new InvalidOperationException($"App '{appId}' did not acknowledge event '{eventName}' (handler '{handlerName}').");
         }
+    }
+
+    /// <summary>
+    /// Runs one step of a data migration in the app container of <paramref name="version"/> (the version being upgraded
+    /// to). The app answers with a checkpoint to continue from, or that it has finished (ADR-0013).
+    /// </summary>
+    public async Task<MigrationRunResponse> RunMigrationStepAsync(
+        string appId,
+        string version,
+        string fromVersion,
+        string toVersion,
+        string migrationClass,
+        string? checkpoint,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = tenantContext.TenantId
+            ?? throw new InvalidOperationException("Cannot run a migration without an active tenant context.");
+
+        var endpoint = orchestrator.ResolveEndpoint(appId, version)
+            ?? throw new InvalidOperationException($"No running container endpoint registered for app '{appId}@{version}'.");
+
+        using var channel = CreateChannel(endpoint);
+        var client = new AppService.AppServiceClient(channel);
+
+        var headers = new Grpc.Core.Metadata();
+        if (!string.IsNullOrWhiteSpace(_options.CoreCallbackEndpoint))
+        {
+            headers.Add("x-erp-core-endpoint", _options.CoreCallbackEndpoint);
+        }
+
+        // The call token is short-lived but a step may run longer than that; callbacks need a fresh one per step.
+        return await client.RunMigrationAsync(
+            new MigrationRunRequest
+            {
+                Context = CreateCallContextProto(tenantId, tenantContext.CompanyId, Guid.NewGuid().ToString("D")),
+                FromVersion = fromVersion,
+                ToVersion = toVersion,
+                MigrationClass = migrationClass,
+                Checkpoint = checkpoint ?? string.Empty
+            },
+            headers: headers,
+            deadline: DateTime.UtcNow.Add(_options.MigrationStepTimeout),
+            cancellationToken: cancellationToken);
     }
 
     public async Task<TOutput?> InvokeInterfaceAsync<TOutput>(
