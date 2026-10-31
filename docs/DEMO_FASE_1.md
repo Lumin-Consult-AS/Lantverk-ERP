@@ -14,9 +14,9 @@ Forventet: alle tester grønne (ingen hoppet over). De som viser porten:
 
 | Del av porten | Test |
 | --- | --- |
-| Installere `demo.contacts`, felt på `core.party`, fane på partkortet | `AppInstallationTests`, `AppExtensionTests` |
-| Avvise notat med dato i fortiden (`OnValidate`) og slette notater når part slettes (`OnEvent`) | `AppHostTests` |
-| Hendelse publisert, levert til app og webhook, spilt av på nytt | `EventTests` |
+| Installere `demo.contacts`, felt på `core.party`, fane på partkortet | `AppInstallationTests`, `ObjectAndPageExtensionTests` |
+| Avvise notat med dato i fortiden (`OnValidate`) og slette notater når part slettes (`OnEvent`) | `AppHostAndSdkTests` |
+| Hendelse publisert, levert til app og webhook, spilt av på nytt | `EventBusTests` |
 | Flyt med to godkjennere og beløpsgrense | `WorkflowTests` |
 | E-post med PDF i innboksen, knyttet til part | `DocumentTests` |
 | Oppgradering 1.0 → 1.1 med migrering, avinstallasjon med arkiv | `AppLifecycleTests` |
