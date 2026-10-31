@@ -7,6 +7,7 @@ using System.Text.Json;
 using Erp.Client.Services;
 using Erp.Core.Domain.Entities;
 using Erp.Core.Domain.Tenancy;
+using Erp.Core.Infrastructure.Apps;
 using Erp.Core.Infrastructure.Documents;
 using Erp.Core.Infrastructure.Notifications;
 using Erp.Core.Infrastructure.Persistence;
@@ -279,6 +280,59 @@ public sealed class DocumentTests(PostgresDatabaseFixture fixture) : IAsyncLifet
         }
         finally
         {
+            await admin.Api.UninstallAppAsync("core.parties");
+        }
+    }
+
+    [Fact]
+    public async Task AnInstalledApp_CanSetTheRetentionOfACategoryForACountry()
+    {
+        await using var env = CreateEnv();
+        var admin = await LoginAsync(env.Factory, null);
+        Assert.True(await admin.Api.InstallBuiltInAppAsync("core.parties"));
+
+        try
+        {
+            var party = await admin.Api.CreateRecordAsync("core.party", Party("P-DOC-3"));
+            async Task<JsonElement> AttachAsync(string category)
+            {
+                using var upload = await UploadAsync(admin, "k.pdf", Encoding.UTF8.GetBytes("kontrakt " + Guid.NewGuid()));
+                var fileId = JsonDocument.Parse(await upload.Content.ReadAsStringAsync()).RootElement.GetProperty("file").GetProperty("id").GetGuid();
+                using var attach = await admin.Http.PostAsJsonAsync(
+                    "/api/v1/attachments", new { fileId, objectId = "core.party", recordId = party.Id, category });
+                Assert.Equal(HttpStatusCode.Created, attach.StatusCode);
+                return JsonDocument.Parse(await attach.Content.ReadAsStringAsync()).RootElement.Clone();
+            }
+
+            async Task<HttpResponseMessage> InstallAsync(string yaml)
+            {
+                var package = new ByteArrayContent(AppPackageFormat.CreateSignedZipFromFiles(new Dictionary<string, string> { ["app.yaml"] = yaml }));
+                package.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/zip");
+                return await admin.Http.PostAsync("/api/v1/apps/install", package);
+            }
+
+            // No rule yet: the category is not kept
+            Assert.Equal(JsonValueKind.Null, (await AttachAsync("kontrakt")).GetProperty("retainUntil").ValueKind);
+
+            // An installed app brings the rule for Norway, and the document service applies it
+            using (var install = await InstallAsync(
+                       "id: demo.retention\nversion: 1.0.0\nname: Oppbevaring\nretention:\n  - country: NO\n    category: kontrakt\n    years: 9\n"))
+            {
+                Assert.True(install.IsSuccessStatusCode, await install.Content.ReadAsStringAsync());
+            }
+
+            var retainUntil = (await AttachAsync("kontrakt")).GetProperty("retainUntil").GetDateTimeOffset();
+            Assert.InRange(retainUntil, DateTimeOffset.UtcNow.AddYears(9).AddDays(-1), DateTimeOffset.UtcNow.AddYears(9).AddDays(1));
+            Assert.Equal(JsonValueKind.Null, (await AttachAsync("avtale")).GetProperty("retainUntil").ValueKind);
+
+            // An invalid rule is refused when installing
+            using var refused = await InstallAsync(
+                "id: demo.retention2\nversion: 1.0.0\nname: Feil\nretention:\n  - country: Norge\n    category: kontrakt\n    years: 0\n");
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        }
+        finally
+        {
+            await admin.Api.UninstallAppAsync("demo.retention");
             await admin.Api.UninstallAppAsync("core.parties");
         }
     }

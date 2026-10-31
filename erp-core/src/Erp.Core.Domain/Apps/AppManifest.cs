@@ -41,6 +41,9 @@ public sealed class AppManifest
     /// <summary>Commands the core runs on a timetable (daily at a time, or at an interval).</summary>
     public List<ScheduleDefinition> Schedules { get; set; } = [];
 
+    /// <summary>How long files in a category are kept, per country (the document service reads these from installed apps).</summary>
+    public List<RetentionRuleDefinition> Retention { get; set; } = [];
+
     /// <summary>
     /// Localization dictionaries keyed by locale code (e.g. <c>nb</c>, <c>en</c>).
     /// </summary>

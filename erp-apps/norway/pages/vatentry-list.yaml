@@ -1,0 +1,9 @@
+id: norway.vatentry-list
+type: list
+object: norway.vatentry
+title: norway.vatentries.title
+columns:
+  - entryDate
+  - vatCode
+  - basis
+  - vatAmount

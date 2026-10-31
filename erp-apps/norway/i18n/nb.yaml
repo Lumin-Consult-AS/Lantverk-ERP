@@ -1,0 +1,36 @@
+norway:
+  settings:
+    title: Norsk oppsett
+  vatcodes:
+    title: MVA-koder
+  vatrates:
+    title: MVA-satser
+  vatentries:
+    title: MVA-posteringer
+  vatreturns:
+    title: MVA-oppgjør
+  card:
+    general: Generelt
+    result: Resultat
+    lines: Grunnlag og avgift per kode
+  actions:
+    calculate: Beregn
+    reopen: Åpne igjen
+  fields:
+    chartVersion: Innlagt versjon
+    code: Kode
+    name: Navn
+    direction: Retning
+    account: MVA-konto
+    isActive: Aktiv
+    rate: Sats (%)
+    validFrom: Gjelder fra
+    validTo: Gjelder til
+    entryDate: Dato
+    vatCode: MVA-kode
+    basis: Grunnlag
+    vatAmount: Avgift
+    startDate: Fra dato
+    endDate: Til dato
+    payable: Å betale
+    status: Status

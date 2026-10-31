@@ -142,10 +142,33 @@ public sealed class AppRetentionService(
             throw new RecordValidationException($"Archive '{archiveId}' is {archive.Status} and cannot be purged.");
         }
 
+        // An object that others in the same app refer to cannot be emptied before they are: a table that is still referenced
+        // waits for another pass, so the objects go in an order that satisfies the foreign keys.
         long rows = 0;
-        foreach (var objectId in archive.ObjectIds)
+        var pending = archive.ObjectIds.ToList();
+        while (pending.Count > 0)
         {
-            rows += await PurgeObjectDataAsync(connection, archive.AppId, objectId, cancellationToken);
+            var blocked = new List<string>();
+            PostgresException? lastBlock = null;
+            foreach (var objectId in pending)
+            {
+                try
+                {
+                    rows += await PurgeObjectDataAsync(connection, archive.AppId, objectId, cancellationToken);
+                }
+                catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.ForeignKeyViolation)
+                {
+                    blocked.Add(objectId);
+                    lastBlock = ex;
+                }
+            }
+
+            if (blocked.Count == pending.Count)
+            {
+                throw lastBlock!;
+            }
+
+            pending = blocked;
         }
 
         await using var update = TenantDb.Create(

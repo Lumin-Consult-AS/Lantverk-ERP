@@ -1,0 +1,282 @@
+id: norway
+version: 1.0.0
+name: Norge-pakken
+publisher: Laftverk
+license: proprietary
+sdk: ">=1.0.0 <2.0.0"
+
+dependencies:
+  finance: ">=1.0.0 <2.0.0"
+
+# All norsk regnskapslogikk: standard kontoplan (NS 4102) med SAF-T-standardkonto, MVA-koder med satser og gyldighet,
+# MVA-beregning på bilagslinjer, MVA-oppgjør per termin og norske krav til bilag og oppbevaring.
+# Regnskapsappen (finance) kjenner ikke denne appen; den henger seg på med utvidelsesfelt, hooks og hendelser.
+runtime:
+  image: ghcr.io/laftverk/norway:1.0.0
+  resources:
+    cpu: 250m
+    memory: 256Mi
+
+# Bilag og vedlegg oppbevares i fem år (bokføringsloven). Dokumenttjenesten leser regelen fra de installerte appene.
+retention:
+  - country: NO
+    category: bilag
+    years: 5
+
+enums:
+  norway.vatdirection: [output, input]
+  norway.vatreturnstatus: [draft, calculated]
+
+objects:
+  # Én post per selskap: hvilken versjon av kontoplan og MVA-koder som er lagt inn. Å opprette posten (siden «Norsk oppsett»)
+  # legger inn kontoplan og MVA-koder; det skjer også når selskapet oppretter sitt første regnskapsår.
+  norway.settings:
+    label: Norsk oppsett
+    fields:
+      singleton:
+        type: string
+        required: true
+        maxLength: 20
+        default: settings
+        label: Nøkkel
+      chartVersion:
+        type: string
+        maxLength: 20
+        label: Innlagt versjon
+    keys:
+      - name: uk_norway_settings_company
+        fields: [singleton]
+        scopeToCompany: true
+
+  # Kodene er Skatteetatens SAF-T-standardkoder for MVA (standard tax code).
+  norway.vatcode:
+    label: MVA-kode
+    fields:
+      code:
+        type: string
+        required: true
+        maxLength: 10
+        label: Kode (SAF-T)
+      name:
+        type: string
+        required: true
+        maxLength: 200
+        label: Navn
+      direction:
+        type: enum
+        of: norway.vatdirection
+        required: true
+        label: Retning
+      account:
+        type: reference
+        to: finance.account
+        label: MVA-konto
+      isActive:
+        type: boolean
+        required: true
+        default: true
+        label: Aktiv
+    keys:
+      - name: uk_vatcode_code
+        fields: [code]
+        scopeToCompany: true
+
+  # Satsene gjelder fra og med «gjelder fra» til og med «gjelder til» (åpen slutt = gjelder fortsatt).
+  norway.vatrate:
+    label: MVA-sats
+    fields:
+      vatCode:
+        type: reference
+        to: norway.vatcode
+        required: true
+        onDelete: cascade
+        label: MVA-kode
+      rate:
+        type: decimal
+        required: true
+        scale: 2
+        minValue: 0
+        maxValue: 100
+        label: Sats (%)
+      validFrom:
+        type: date
+        required: true
+        label: Gjelder fra
+      validTo:
+        type: date
+        label: Gjelder til
+
+  # Grunnlag og avgift per bokført linje med MVA-kode. Lages av appen når et bilag er bokført (og negert for motposteringer).
+  # Fortegn: utgående kode er positiv ved kredit, inngående kode er positiv ved debet.
+  norway.vatentry:
+    label: MVA-postering
+    fields:
+      sourceKey:
+        type: string
+        required: true
+        maxLength: 80
+        label: Kilde
+      entry:
+        type: uuid
+        required: true
+        label: Bokført bilag
+      entryDate:
+        type: date
+        required: true
+        label: Dato
+      vatCode:
+        type: reference
+        to: norway.vatcode
+        required: true
+        label: MVA-kode
+      basis:
+        type: decimal
+        required: true
+        scale: 2
+        label: Grunnlag
+      vatAmount:
+        type: decimal
+        required: true
+        scale: 2
+        label: Avgift
+    keys:
+      - name: uk_vatentry_source
+        fields: [sourceKey]
+        scopeToCompany: true
+
+  # MVA-oppgjør for en termin: grunnlag og avgift per kode, og beløpet som skal betales (eller tilgode).
+  norway.vatreturn:
+    label: MVA-oppgjør
+    fields:
+      name:
+        type: string
+        required: true
+        maxLength: 100
+        label: Termin
+      startDate:
+        type: date
+        required: true
+        label: Fra dato
+      endDate:
+        type: date
+        required: true
+        label: Til dato
+      outputVat:
+        type: decimal
+        scale: 2
+        default: 0
+        label: Utgående MVA
+      inputVat:
+        type: decimal
+        scale: 2
+        default: 0
+        label: Inngående MVA
+      payable:
+        type: decimal
+        scale: 2
+        default: 0
+        label: Å betale (negativ = til gode)
+      status:
+        type: enum
+        of: norway.vatreturnstatus
+        required: true
+        default: draft
+        label: Status
+    status:
+      field: status
+      initial: draft
+      transitions:
+        calculate:
+          from: draft
+          to: calculated
+          permission: post
+        reopen:
+          from: calculated
+          to: draft
+          permission: post
+
+  norway.vatreturnline:
+    label: MVA-oppgjør per kode
+    fields:
+      vatReturn:
+        type: reference
+        to: norway.vatreturn
+        required: true
+        onDelete: cascade
+        label: MVA-oppgjør
+      vatCode:
+        type: reference
+        to: norway.vatcode
+        required: true
+        label: MVA-kode
+      basis:
+        type: decimal
+        required: true
+        scale: 2
+        label: Grunnlag
+      vatAmount:
+        type: decimal
+        required: true
+        scale: 2
+        label: Avgift
+
+# MVA-kode på bilagslinjen, og SAF-T-standardkonto på kontoen. Linjer som appen lager for MVA-beløpet peker tilbake
+# til linjen med grunnlaget.
+extensions:
+  finance.voucherline:
+    fields:
+      vatCode:
+        type: reference
+        to: norway.vatcode
+        label: MVA-kode
+      vatSourceLine:
+        type: uuid
+        label: MVA for linje
+  finance.account:
+    fields:
+      standardAccount:
+        type: string
+        maxLength: 10
+        label: SAF-T-standardkonto
+
+events:
+  publishes:
+    - norway.setup.requested@1
+  subscribes:
+    - core.fiscalyear.created@1: OnFiscalYearCreated
+    - norway.setup.requested@1: OnSetupRequested
+    - finance.journal.posted@1: OnJournalPosted
+
+pages:
+  - pages/settings-list.yaml
+  - pages/vatcode-list.yaml
+  - pages/vatrate-list.yaml
+  - pages/vatentry-list.yaml
+  - pages/vatreturn-list.yaml
+  - pages/vatreturn-card.yaml
+
+permissionSets:
+  - id: norway.admin
+    label: Norge-pakken – oppsett
+    grants:
+      norway.settings: [read, create, update]
+      norway.vatcode: [read, create, update, delete]
+      norway.vatrate: [read, create, update, delete]
+  - id: norway.reader
+    label: Norge-pakken – lesetilgang
+    grants:
+      norway.settings: [read]
+      norway.vatcode: [read]
+      norway.vatrate: [read]
+      norway.vatentry: [read]
+      norway.vatreturn: [read]
+      norway.vatreturnline: [read]
+  - id: norway.bookkeeper
+    label: Norge-pakken – MVA
+    grants:
+      norway.settings: [read]
+      norway.vatcode: [read]
+      norway.vatrate: [read]
+      norway.vatentry: [read, create]
+      norway.vatreturn: [read, create, update, delete, post]
+      norway.vatreturnline: [read, create, update, delete]

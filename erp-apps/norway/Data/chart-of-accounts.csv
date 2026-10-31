@@ -1,0 +1,74 @@
+number;name;type;control;standardAccount
+1070;Utsatt skattefordel;asset;none;1070
+1200;Maskiner og anlegg;asset;none;1200
+1230;Personbiler;asset;none;1230
+1240;Varebiler;asset;none;1240
+1250;Inventar;asset;none;1250
+1280;Kontormaskiner;asset;none;1280
+1400;Beholdning av råvarer og innkjøpte halvfabrikata;asset;none;1400
+1460;Beholdning av egentilvirkede ferdige varer;asset;none;1460
+1470;Beholdning av innkjøpte varer for videresalg;asset;none;1470
+1500;Kundefordringer;asset;receivable;1500
+1570;Andre kortsiktige fordringer;asset;none;1570
+1580;Avsetning for tap på fordringer;asset;none;1580
+1700;Forskuddsbetalt kostnad;asset;none;1700
+1750;Påløpt inntekt;asset;none;1750
+1900;Kontanter;asset;none;1900
+1920;Bankinnskudd;asset;none;1920
+1950;Bankinnskudd for skattetrekk;asset;none;1950
+2000;Aksjekapital;equity;none;2000
+2020;Overkursfond;equity;none;2020
+2050;Annen egenkapital;equity;none;2050
+2080;Udisponert resultat;equity;none;2080
+2220;Gjeld til kredittinstitusjoner;liability;none;2220
+2400;Leverandørgjeld;liability;payable;2400
+2500;Betalbar skatt;liability;none;2500
+2600;Forskuddstrekk;liability;none;2600
+2700;Utgående merverdiavgift;liability;none;2700
+2710;Inngående merverdiavgift;liability;none;2710
+2740;Oppgjørskonto merverdiavgift;liability;none;2740
+2770;Skyldig arbeidsgiveravgift;liability;none;2770
+2800;Avsatt utbytte;liability;none;2800
+2900;Forskudd fra kunder;liability;none;2900
+2920;Skyldig lønn;liability;none;2920
+2940;Skyldig feriepenger;liability;none;2940
+2990;Annen kortsiktig gjeld;liability;none;2990
+3000;Salgsinntekt, avgiftspliktig;revenue;none;3000
+3100;Salgsinntekt, avgiftsfri;revenue;none;3100
+3200;Salgsinntekt, utenfor avgiftsområdet;revenue;none;3200
+3400;Offentlig tilskudd;revenue;none;3400
+3600;Leieinntekt;revenue;none;3600
+3900;Annen driftsinntekt;revenue;none;3900
+4000;Varekostnad;expense;none;4000
+4300;Innkjøp av varer for videresalg;expense;none;4300
+4500;Fremmedytelser;expense;none;4500
+5000;Lønn;expense;none;5000
+5090;Feriepenger;expense;none;5090
+5400;Arbeidsgiveravgift;expense;none;5400
+5420;Pensjonskostnad;expense;none;5420
+5900;Gave til ansatte;expense;none;5900
+6010;Avskrivning på maskiner og inventar;expense;none;6010
+6300;Leie lokaler;expense;none;6300
+6340;Lys og varme;expense;none;6340
+6400;Leie maskiner;expense;none;6400
+6540;Inventar;expense;none;6540
+6550;Driftsmateriale;expense;none;6550
+6700;Revisjonshonorar;expense;none;6700
+6720;Honorar for regnskapsmessig bistand;expense;none;6720
+6800;Kontorrekvisita;expense;none;6800
+6860;Møtekostnad;expense;none;6860
+6900;Telefon;expense;none;6900
+6940;Porto;expense;none;6940
+7000;Drivstoff;expense;none;7000
+7100;Bilgodtgjørelse;expense;none;7100
+7140;Reisekostnad;expense;none;7140
+7320;Reklamekostnad;expense;none;7320
+7500;Forsikringspremie;expense;none;7500
+7770;Bank- og kortgebyr;expense;none;7770
+7790;Annen kostnad;expense;none;7790
+8050;Renteinntekt;revenue;none;8050
+8070;Annen finansinntekt;revenue;none;8070
+8071;Valutagevinst (agio);revenue;none;8071
+8150;Rentekostnad;expense;none;8150
+8160;Valutatap (disagio);expense;none;8160
+8300;Skattekostnad på ordinært resultat;expense;none;8300
