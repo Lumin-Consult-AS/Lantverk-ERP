@@ -276,9 +276,12 @@ public sealed class NorwayApp : AppBase
             return new Resolved(code, null, $"MVA-kode {code.Get<string>("code")} har ingen sats den {date:yyyy-MM-dd}.");
         }
 
-        if (rate.Get<decimal>("rate") > 0 && code.Get<Guid?>("account") is null)
+        // The account may have been removed from the chart after the code was set up (the reference crosses apps, so the
+        // database does not hold it): the code then has to be pointed at an account again.
+        if (rate.Get<decimal>("rate") > 0
+            && (code.Get<Guid?>("account") is not { } accountId || await ctx.Data.GetAsync(Account, accountId) is null))
         {
-            return new Resolved(code, null, $"MVA-kode {code.Get<string>("code")} mangler MVA-konto.");
+            return new Resolved(code, null, $"MVA-kode {code.Get<string>("code")} mangler MVA-konto (kontoen er ikke satt eller er fjernet).");
         }
 
         return new Resolved(code, rate.Get<decimal>("rate"), null);

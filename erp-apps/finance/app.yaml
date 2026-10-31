@@ -426,6 +426,7 @@ events:
 pages:
   - pages/settings-list.yaml
   - pages/account-list.yaml
+  - pages/account-card.yaml
   - pages/voucher-list.yaml
   - pages/voucher-card.yaml
   - pages/journalentry-list.yaml
@@ -454,7 +455,7 @@ permissionSets:
     label: Regnskap – bokføring
     grants:
       finance.settings: [read]
-      finance.account: [read, create, update]
+      finance.account: [read, create, update, delete]
       finance.voucher: [read, create, update, delete, post]
       finance.voucherline: [read, create, update, delete]
       finance.journalentry: [read, create]

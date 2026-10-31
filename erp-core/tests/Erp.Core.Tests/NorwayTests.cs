@@ -112,6 +112,61 @@ public sealed class NorwayTests(PostgresDatabaseFixture fixture)
         Assert.Equal("Mobil og bredbånd", Field((await QueryAsync(c, "finance.account", "number eq '6900'")).Single(), "name"));
     }
 
+    [Fact]
+    public async Task TheChartOfAccounts_CanBeExtendedChangedAndPruned_AndAnAccountInUseCannotBeRemoved()
+    {
+        await using var env = await SetUpAsync();
+        var c = env.Client;
+        var a = await AccountsAsync(c);
+
+        // Add an account of your own, with a SAF-T standard account, and change it
+        var own = await CreateAsync(c, "finance.account", new Dictionary<string, object?>
+        {
+            ["number"] = "1925", ["name"] = "Sparekonto", ["accountType"] = "asset", ["norway.standardAccount"] = "1920"
+        });
+        using (var change = await PatchAsync(c, "finance.account", own, new Dictionary<string, object?>
+               {
+                   ["name"] = "Sparekonto skatt", ["norway.standardAccount"] = "1950"
+               }))
+        {
+            Assert.Equal(HttpStatusCode.OK, change.StatusCode);
+            own = JsonDocument.Parse(await change.Content.ReadAsStringAsync()).RootElement.Clone();
+        }
+
+        Assert.Equal("Sparekonto skatt", Field(own, "name"));
+        Assert.Equal("1950", Field(own, "norway.standardAccount"));
+
+        // An account that is not used can be removed, also one from the standard chart
+        Assert.True(await DeleteAsync(c, "finance.account", own));
+        Assert.True(await DeleteAsync(c, "finance.account", a["6940"]));
+        Assert.Empty(await QueryAsync(c, "finance.account", "number eq '6940'"));
+
+        // An account that has been posted to cannot be removed (the ledger is immutable); it can be made inactive instead
+        await PostAsync(c, "2026-03-05", "Salg", (a["1920"], 100m, 0m, null), (a["3000"], 0m, 100m, null));
+        Assert.False(await DeleteAsync(c, "finance.account", a["3000"]));
+        using (var deactivate = await PatchAsync(c, "finance.account", a["3000"], new { isActive = false }))
+        {
+            Assert.Equal(HttpStatusCode.OK, deactivate.StatusCode);
+        }
+
+        // The VAT account of a VAT code can be removed, but then the code is refused on a line until it has an account again
+        Assert.True(await DeleteAsync(c, "finance.account", a["2700"]));
+        var draft = await CreateVoucherAsync(c, "2026-03-06", "Uten MVA-konto");
+        using (var noAccount = await c.PostAsJsonAsync(Url("finance.voucherline"), new Dictionary<string, object?>
+               {
+                   ["voucher"] = Id(draft), ["account"] = Id(a["3100"]), ["credit"] = 100m, ["norway.vatCode"] = Id(a.Code("3"))
+               }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, noAccount.StatusCode);
+            Assert.Contains("mangler MVA-konto", await noAccount.Content.ReadAsStringAsync());
+        }
+
+        // What was removed or changed is not put back by the set-up
+        await CreateAsync(c, "core.fiscalyear", new { year = 2027, startDate = "2027-01-01", endDate = "2027-12-31" });
+        await Task.Delay(1500);
+        Assert.Empty(await QueryAsync(c, "finance.account", "number eq '6940'"));
+    }
+
     // ------------------------------------------------------------------ VAT on lines
 
     [Fact]
@@ -426,6 +481,15 @@ public sealed class NorwayTests(PostgresDatabaseFixture fixture)
     {
         var res = await c.GetFromJsonAsync<JsonElement>($"{Url(objectId)}?filter={Uri.EscapeDataString(filter)}&top={top}");
         return res.EnumerateArray().Select(e => e.Clone()).ToList();
+    }
+
+    private static async Task<bool> DeleteAsync(HttpClient c, string objectId, JsonElement record)
+    {
+        var current = await c.GetFromJsonAsync<JsonElement>($"{Url(objectId)}/{Id(record)}");
+        using var req = new HttpRequestMessage(HttpMethod.Delete, $"{Url(objectId)}/{Id(record)}");
+        req.Headers.IfMatch.Add(new EntityTagHeaderValue($"\"{current.GetProperty("rowVersion").GetInt64()}\""));
+        using var res = await c.SendAsync(req);
+        return res.IsSuccessStatusCode;
     }
 
     private static async Task<List<JsonElement>> AggregateAsync(HttpClient c, string objectId, object body)

@@ -1,0 +1,12 @@
+id: finance.account-card
+type: card
+object: finance.account
+title: "{number} {name}"
+groups:
+  - label: finance.card.general
+    fields:
+      - number
+      - name
+      - accountType
+      - controlType
+      - isActive

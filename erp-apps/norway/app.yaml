@@ -254,6 +254,8 @@ pages:
   - pages/vatentry-list.yaml
   - pages/vatreturn-list.yaml
   - pages/vatreturn-card.yaml
+  - extend: finance.account-card
+    file: pages/account-card-ext.yaml
 
 permissionSets:
   - id: norway.admin
