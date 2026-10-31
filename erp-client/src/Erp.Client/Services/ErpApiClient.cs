@@ -416,6 +416,23 @@ public sealed class ErpApiClient(HttpClient httpClient, I18nService i18n)
         return (await res.Content.ReadFromJsonAsync<ClientAdminUser>(JsonOptions, ct))!;
     }
 
+    // ---- scheduled jobs (tenant administrators)
+
+    public async Task<IReadOnlyList<ClientSchedule>> GetSchedulesAsync(CancellationToken ct = default) =>
+        await httpClient.GetFromJsonAsync<List<ClientSchedule>>("/api/v1/schedules", JsonOptions, ct) ?? [];
+
+    public async Task<IReadOnlyList<ClientScheduleRun>> GetScheduleRunsAsync(string appId, string scheduleId, CancellationToken ct = default) =>
+        await httpClient.GetFromJsonAsync<List<ClientScheduleRun>>(
+            $"/api/v1/schedules/{Uri.EscapeDataString(appId)}/{Uri.EscapeDataString(scheduleId)}/runs", JsonOptions, ct) ?? [];
+
+    /// <summary>Runs a job now (<c>run</c>), or starts / stops its timetable (<c>start</c> / <c>stop</c>).</summary>
+    public async Task ScheduleActionAsync(string appId, string scheduleId, string action, CancellationToken ct = default)
+    {
+        using var res = await httpClient.PostAsync(
+            $"/api/v1/schedules/{Uri.EscapeDataString(appId)}/{Uri.EscapeDataString(scheduleId)}/{action}", null, ct);
+        await EnsureSuccessOrThrowReadableAsync(res, ct);
+    }
+
     public async Task<IReadOnlyList<ClientUserSummary>> GetUsersAsync(CancellationToken ct = default) =>
         await httpClient.GetFromJsonAsync<List<ClientUserSummary>>("/api/v1/core/users", JsonOptions, ct) ?? [];
 

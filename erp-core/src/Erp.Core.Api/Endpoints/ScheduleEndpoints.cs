@@ -26,5 +26,27 @@ public static class ScheduleEndpoints
                 return Results.NotFound(new { error = ex.Message });
             }
         });
+
+        schedules.MapPost("/{appId}/{scheduleId}/start", (string appId, string scheduleId, ScheduleService service, CancellationToken ct) =>
+            SetEnabledAsync(service, appId, scheduleId, true, ct));
+
+        schedules.MapPost("/{appId}/{scheduleId}/stop", (string appId, string scheduleId, ScheduleService service, CancellationToken ct) =>
+            SetEnabledAsync(service, appId, scheduleId, false, ct));
+
+        schedules.MapGet("/{appId}/{scheduleId}/runs", async (string appId, string scheduleId, ScheduleService service, CancellationToken ct, int limit = 50) =>
+            Results.Ok(await service.ListRunsAsync(appId, scheduleId, limit, ct)));
+    }
+
+    private static async Task<IResult> SetEnabledAsync(ScheduleService service, string appId, string scheduleId, bool enabled, CancellationToken ct)
+    {
+        try
+        {
+            await service.SetEnabledAsync(appId, scheduleId, enabled, DateTimeOffset.UtcNow, ct);
+            return Results.NoContent();
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
+        }
     }
 }
