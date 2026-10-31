@@ -24,6 +24,9 @@ enums:
   finance.openitemstatus: [open, settled]
   finance.settlementstatus: [draft, completed]
   finance.side: [debit, credit]
+  finance.batchstatus: [draft, pending, approved, released]
+  finance.deliverystatus: [none, sent, failed]
+  finance.transactionstatus: [new, matched, ignored]
 
 # Landsuavhengig hovedbok. Alt norsk (kontoplan, MVA, SAF-T) ligger i Norge-pakken.
 objects:
@@ -416,10 +419,311 @@ objects:
         scale: 2
         label: Utlignet beløp
 
+  # ------------------------------------------------------------------ bankkontrakten
+  # Bank løses med en kontrakt og adaptere (ADR-0028). Kontrakten er disse objektene og hendelsene: regnskapsappen lager en
+  # betalingsbunt og publiserer finance.paymentbatch.released@1 når den er godkjent; en bankadapter (en egen app) sender den
+  # og skriver resultatet tilbake, og leverer kontoutskrifter og innbetalinger som bankutskrift og banktransaksjon.
+
+  finance.bankaccount:
+    label: Bankkonto
+    fields:
+      name:
+        type: string
+        required: true
+        maxLength: 100
+        label: Navn
+      accountNumber:
+        type: string
+        required: true
+        maxLength: 34
+        label: Kontonummer / IBAN
+      bic:
+        type: string
+        maxLength: 11
+        label: BIC
+      holderName:
+        type: string
+        required: true
+        maxLength: 140
+        label: Kontoeier
+      holderId:
+        type: string
+        maxLength: 35
+        label: Kontoeiers identifikator (organisasjonsnummer)
+      ledgerAccount:
+        type: reference
+        to: finance.account
+        required: true
+        label: Hovedbokskonto
+      currency:
+        type: string
+        required: true
+        maxLength: 3
+        pattern: "^[A-Z]{3}$"
+        label: Valuta
+    keys:
+      - name: uk_bankaccount_number
+        fields: [accountNumber]
+        scopeToCompany: true
+
+  # En betalingsbunt: leverandørposter som skal betales sammen. Lages med forslag fra forfalte åpne poster (feltet «Forfall til
+  # og med») og går gjennom godkjenningsflyten før den sendes.
+  finance.paymentbatch:
+    label: Betalingsbunt
+    fields:
+      name:
+        type: string
+        required: true
+        maxLength: 100
+        label: Navn
+      bankAccount:
+        type: reference
+        to: finance.bankaccount
+        required: true
+        label: Betales fra
+      executionDate:
+        type: date
+        required: true
+        label: Betalingsdato
+      dueUntil:
+        type: date
+        label: Forfall til og med (lager forslag)
+      totalAmount:
+        type: decimal
+        scale: 2
+        default: 0
+        label: Sum
+      paymentCount:
+        type: integer
+        default: 0
+        label: Antall betalinger
+      status:
+        type: enum
+        of: finance.batchstatus
+        required: true
+        default: draft
+        label: Status
+      deliveryStatus:
+        type: enum
+        of: finance.deliverystatus
+        required: true
+        default: none
+        label: Sendt til bank
+      file:
+        type: uuid
+        label: Betalingsfil
+      message:
+        type: string
+        maxLength: 2000
+        label: Melding fra bankadapter
+    status:
+      field: status
+      initial: draft
+      transitions:
+        submit:
+          from: draft
+          to: pending
+          permission: update
+          workflow: finance.paymentbatch.approval
+        approve:
+          from: pending
+          to: approved
+          permission: approve
+        reject:
+          from: pending
+          to: draft
+          permission: approve
+        # Godkjenning og frigivelse til banken er to ulike handlinger (og kan gjøres av ulike personer): adapteren handler med
+        # rettighetene til den som frigir.
+        release:
+          from: approved
+          to: released
+          permission: post
+
+  finance.payment:
+    label: Betaling
+    fields:
+      batch:
+        type: reference
+        to: finance.paymentbatch
+        required: true
+        onDelete: cascade
+        label: Bunt
+      openItem:
+        type: reference
+        to: finance.openitem
+        label: Åpen post
+      party:
+        type: reference
+        to: core.party
+        required: true
+        label: Leverandør
+      creditorName:
+        type: string
+        required: true
+        maxLength: 200
+        label: Mottaker
+      creditorAccount:
+        type: string
+        maxLength: 34
+        label: Mottakers konto
+      amount:
+        type: decimal
+        required: true
+        scale: 2
+        minValue: 0.01
+        label: Beløp
+      currency:
+        type: string
+        required: true
+        maxLength: 3
+        pattern: "^[A-Z]{3}$"
+        label: Valuta
+      paymentReference:
+        type: string
+        maxLength: 35
+        label: Betalingsreferanse
+      message:
+        type: string
+        maxLength: 140
+        label: Melding til mottaker
+      dueDate:
+        type: date
+        label: Forfallsdato
+    keys:
+      - name: uk_payment_openitem
+        fields: [openItem]
+        scopeToCompany: true
+
+  # Det banken melder tilbake. Adapteren lager disse; avstemming mot hovedboken kommer i neste steg.
+  finance.bankstatement:
+    label: Bankutskrift
+    fields:
+      bankAccount:
+        type: reference
+        to: finance.bankaccount
+        required: true
+        label: Bankkonto
+      externalId:
+        type: string
+        required: true
+        maxLength: 100
+        label: Utskriftens id
+      fromDate:
+        type: date
+        label: Fra dato
+      toDate:
+        type: date
+        label: Til dato
+      openingBalance:
+        type: decimal
+        scale: 2
+        label: Inngående saldo
+      closingBalance:
+        type: decimal
+        scale: 2
+        label: Utgående saldo
+      currency:
+        type: string
+        maxLength: 3
+        label: Valuta
+    keys:
+      - name: uk_bankstatement_external
+        fields: [externalId]
+        scopeToCompany: true
+
+  finance.banktransaction:
+    label: Banktransaksjon
+    fields:
+      bankAccount:
+        type: reference
+        to: finance.bankaccount
+        required: true
+        label: Bankkonto
+      statement:
+        type: reference
+        to: finance.bankstatement
+        label: Bankutskrift
+      externalId:
+        type: string
+        required: true
+        maxLength: 200
+        label: Transaksjonens id
+      bookingDate:
+        type: date
+        required: true
+        label: Bokført
+      valueDate:
+        type: date
+        label: Valuteringsdato
+      amount:
+        type: decimal
+        required: true
+        scale: 2
+        label: Beløp (innbetaling positiv, utbetaling negativ)
+      currency:
+        type: string
+        required: true
+        maxLength: 3
+        label: Valuta
+      counterpartyName:
+        type: string
+        maxLength: 200
+        label: Motpart
+      counterpartyAccount:
+        type: string
+        maxLength: 34
+        label: Motparts konto
+      paymentReference:
+        type: string
+        maxLength: 35
+        label: Betalingsreferanse
+      message:
+        type: string
+        maxLength: 500
+        label: Melding
+      endToEndId:
+        type: string
+        maxLength: 100
+        label: Ende-til-ende-id
+      status:
+        type: enum
+        of: finance.transactionstatus
+        required: true
+        default: new
+        label: Status
+    keys:
+      - name: uk_banktransaction_external
+        fields: [externalId]
+        scopeToCompany: true
+
+# Leverandørens bankkonto, brukt som forslag når en betalingsbunt lages.
+extensions:
+  core.party:
+    fields:
+      bankAccount:
+        type: string
+        maxLength: 34
+        label: Bankkonto (for utbetaling)
+
+workflows:
+  - id: finance.paymentbatch.approval
+    object: finance.paymentbatch
+    trigger: submit
+    mode: sequential
+    delegation: allowed
+    onComplete: approve
+    onReject: reject
+    steps:
+      - name: Godkjenn betalinger
+        assignee: { role: finance.approver }
+        when: { field: totalAmount, gt: 0 }
+
 events:
   publishes:
     - finance.journal.posted@1
     - finance.settlement.completed@1
+    - finance.paymentbatch.released@1
   subscribes:
     - core.fiscalyear.created@1: OnFiscalYearCreated
 
@@ -433,12 +737,25 @@ pages:
   - pages/journalentry-card.yaml
   - pages/posting-list.yaml
   - pages/openitem-list.yaml
+  - pages/bankaccount-list.yaml
+  - pages/bankaccount-card.yaml
+  - pages/paymentbatch-list.yaml
+  - pages/paymentbatch-card.yaml
+  - pages/bankstatement-list.yaml
+  - pages/banktransaction-list.yaml
 
 permissionSets:
   - id: finance.admin
     label: Regnskap – innstillinger
     grants:
       finance.settings: [read, create, update]
+      finance.bankaccount: [read, create, update, delete]
+  - id: finance.approver
+    label: Regnskap – godkjenning av betalinger
+    grants:
+      finance.paymentbatch: [read, approve]
+      finance.payment: [read]
+      finance.bankaccount: [read]
   - id: finance.reader
     label: Regnskap – lesetilgang
     grants:
@@ -451,6 +768,11 @@ permissionSets:
       finance.openitem: [read]
       finance.settlement: [read]
       finance.settlementitem: [read]
+      finance.bankaccount: [read]
+      finance.paymentbatch: [read]
+      finance.payment: [read]
+      finance.bankstatement: [read]
+      finance.banktransaction: [read]
   - id: finance.bookkeeper
     label: Regnskap – bokføring
     grants:
@@ -463,3 +785,8 @@ permissionSets:
       finance.openitem: [read, create, update]
       finance.settlement: [read, create, update, delete, post]
       finance.settlementitem: [read, create, update, delete]
+      finance.bankaccount: [read]
+      finance.paymentbatch: [read, create, update, delete, post]
+      finance.payment: [read, create, update, delete]
+      finance.bankstatement: [read, create, update]
+      finance.banktransaction: [read, create, update]

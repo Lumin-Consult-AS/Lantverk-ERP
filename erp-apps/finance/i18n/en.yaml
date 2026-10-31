@@ -11,11 +11,25 @@ finance:
     title: Postings
   openitems:
     title: Sub-ledger – open items
+  bankaccounts:
+    title: Bank accounts
+  paymentbatches:
+    title: Payment batches
+  bankstatements:
+    title: Bank statements
+  banktransactions:
+    title: Bank transactions
   card:
+    delivery: Bank
+    payments: Payments
     general: General
     lines: Lines
     postings: Postings
   actions:
+    submit: Submit for approval
+    approve: Approve
+    reject: Reject
+    release: Release to bank
     post: Post
   fields:
     number: Account number

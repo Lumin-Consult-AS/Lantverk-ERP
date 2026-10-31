@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fx.NorgesBank.App", "..\erp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Norway.App", "..\erp-apps\norway\Norway.App.csproj", "{2236BBBD-3E45-4F09-A318-21DEB808F777}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bank.Iso20022.App", "..\erp-apps\bank.iso20022\Bank.Iso20022.App.csproj", "{FD623C74-41B4-41CD-AF44-F6CF6A624D51}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -171,6 +173,18 @@ Global
 		{2236BBBD-3E45-4F09-A318-21DEB808F777}.Release|x64.Build.0 = Release|Any CPU
 		{2236BBBD-3E45-4F09-A318-21DEB808F777}.Release|x86.ActiveCfg = Release|Any CPU
 		{2236BBBD-3E45-4F09-A318-21DEB808F777}.Release|x86.Build.0 = Release|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Debug|x64.Build.0 = Debug|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Debug|x86.Build.0 = Debug|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Release|x64.ActiveCfg = Release|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Release|x64.Build.0 = Release|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Release|x86.ActiveCfg = Release|Any CPU
+		{FD623C74-41B4-41CD-AF44-F6CF6A624D51}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,0 +1,11 @@
+bank:
+  imports:
+    title: Bank file import
+  fields:
+    file: File
+    bankAccount: Bank account
+    status: Status
+    statementCount: New statements
+    transactionCount: New transactions
+    duplicateCount: Already imported
+    message: Message

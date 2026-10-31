@@ -1,0 +1,12 @@
+id: bank.import-list
+type: list
+object: bank.import
+title: bank.imports.title
+columns:
+  - file
+  - bankAccount
+  - status
+  - statementCount
+  - transactionCount
+  - duplicateCount
+  - message

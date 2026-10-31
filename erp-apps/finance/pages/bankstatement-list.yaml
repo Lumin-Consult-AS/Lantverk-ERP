@@ -1,0 +1,11 @@
+id: finance.bankstatement-list
+type: list
+object: finance.bankstatement
+title: finance.bankstatements.title
+columns:
+  - externalId
+  - bankAccount
+  - fromDate
+  - toDate
+  - openingBalance
+  - closingBalance

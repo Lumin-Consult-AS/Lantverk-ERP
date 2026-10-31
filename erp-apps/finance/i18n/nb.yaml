@@ -11,11 +11,25 @@ finance:
     title: Posteringer
   openitems:
     title: Reskontro – åpne poster
+  bankaccounts:
+    title: Bankkontoer
+  paymentbatches:
+    title: Betalingsbunter
+  bankstatements:
+    title: Bankutskrifter
+  banktransactions:
+    title: Banktransaksjoner
   card:
+    delivery: Bank
+    payments: Betalinger
     general: Generelt
     lines: Linjer
     postings: Posteringer
   actions:
+    submit: Send til godkjenning
+    approve: Godkjenn
+    reject: Avvis
+    release: Frigi til bank
     post: Bokfør
   fields:
     number: Kontonummer
