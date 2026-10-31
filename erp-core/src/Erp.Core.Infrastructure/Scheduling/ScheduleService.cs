@@ -34,7 +34,11 @@ public sealed record ScheduleInfo(
     DateTimeOffset NextRunAt,
     DateTimeOffset? LastRunAt,
     string? LastStatus,
-    string? LastMessage);
+    string? LastMessage,
+    bool Enabled);
+
+public sealed record ScheduleRunLogEntry(
+    long Id, DateTimeOffset StartedAt, DateTimeOffset FinishedAt, string Trigger, string Status, string? Message);
 
 public sealed record ScheduleRunResult(string AppId, string ScheduleId, string Status, string? Message);
 
@@ -91,7 +95,7 @@ public sealed class ScheduleService(
         {
             if (await ClaimAsync(definition, now, onlyIfDue: true, cancellationToken))
             {
-                results.Add(await RunClaimedAsync(definition, now, cancellationToken));
+                results.Add(await RunClaimedAsync(definition, now, "schedule", cancellationToken));
             }
         }
 
@@ -108,18 +112,18 @@ public sealed class ScheduleService(
             ?? throw new KeyNotFoundException($"Schedule '{scheduleId}' of app '{appId}' was not found.");
 
         await ClaimAsync(definition, now, onlyIfDue: false, cancellationToken);
-        return await RunClaimedAsync(definition, now, cancellationToken);
+        return await RunClaimedAsync(definition, now, "manual", cancellationToken);
     }
 
     public async Task<IReadOnlyList<ScheduleInfo>> ListAsync(CancellationToken cancellationToken)
     {
         var definitions = await LoadDefinitionsAsync(cancellationToken);
         var connection = await TenantDb.OpenAsync(dbContext, tenantContext, cancellationToken);
-        var state = new Dictionary<string, (DateTimeOffset Next, DateTimeOffset? Last, string? Status, string? Message)>(StringComparer.OrdinalIgnoreCase);
+        var state = new Dictionary<string, (DateTimeOffset Next, DateTimeOffset? Last, string? Status, string? Message, bool Enabled)>(StringComparer.OrdinalIgnoreCase);
         await using (var cmd = TenantDb.Create(
                          connection,
                          null,
-                         "SELECT app_id, schedule_id, next_run_at, last_run_at, last_status, last_message FROM core.app_schedule;"))
+                         "SELECT app_id, schedule_id, next_run_at, last_run_at, last_status, last_message, enabled FROM core.app_schedule;"))
         await using (var reader = await cmd.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
@@ -128,7 +132,8 @@ public sealed class ScheduleService(
                     reader.GetFieldValue<DateTimeOffset>(2),
                     reader.IsDBNull(3) ? null : reader.GetFieldValue<DateTimeOffset>(3),
                     reader.IsDBNull(4) ? null : reader.GetString(4),
-                    reader.IsDBNull(5) ? null : reader.GetString(5));
+                    reader.IsDBNull(5) ? null : reader.GetString(5),
+                    reader.GetBoolean(6));
             }
         }
 
@@ -138,11 +143,59 @@ public sealed class ScheduleService(
             {
                 var s = state[$"{d.OwnerApp}|{d.Id}"];
                 return new ScheduleInfo(
-                    d.OwnerApp, d.Id, d.Label, d.CommandId, d.At?.ToString("HH:mm"), d.EveryMinutes, s.Next, s.Last, s.Status, s.Message);
+                    d.OwnerApp, d.Id, d.Label, d.CommandId, d.At?.ToString("HH:mm"), d.EveryMinutes, s.Next, s.Last, s.Status, s.Message, s.Enabled);
             })
             .OrderBy(i => i.AppId)
             .ThenBy(i => i.ScheduleId)
             .ToList();
+    }
+
+    /// <summary>Stops (<c>false</c>) or starts (<c>true</c>) a schedule. A stopped job is skipped by the worker but can still be run by hand.</summary>
+    public async Task SetEnabledAsync(string appId, string scheduleId, bool enabled, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await SyncAsync(now, cancellationToken);
+        var connection = await TenantDb.OpenAsync(dbContext, tenantContext, cancellationToken);
+        await using var cmd = TenantDb.Create(
+            connection,
+            null,
+            "UPDATE core.app_schedule SET enabled = @enabled WHERE app_id = @app AND schedule_id = @schedule;");
+        TenantDb.Add(cmd, "app", NpgsqlDbType.Varchar, appId);
+        TenantDb.Add(cmd, "schedule", NpgsqlDbType.Varchar, scheduleId);
+        TenantDb.Add(cmd, "enabled", NpgsqlDbType.Boolean, enabled);
+        if (await cmd.ExecuteNonQueryAsync(cancellationToken) == 0)
+        {
+            throw new KeyNotFoundException($"Schedule '{scheduleId}' of app '{appId}' was not found.");
+        }
+    }
+
+    /// <summary>The latest runs of one schedule, newest first, with their outcome and error message.</summary>
+    public async Task<IReadOnlyList<ScheduleRunLogEntry>> ListRunsAsync(string appId, string scheduleId, int limit, CancellationToken cancellationToken)
+    {
+        var connection = await TenantDb.OpenAsync(dbContext, tenantContext, cancellationToken);
+        await using var cmd = TenantDb.Create(
+            connection,
+            null,
+            """
+            SELECT id, started_at, finished_at, trigger, status, message FROM core.app_schedule_run
+             WHERE app_id = @app AND schedule_id = @schedule ORDER BY id DESC LIMIT @limit;
+            """);
+        TenantDb.Add(cmd, "app", NpgsqlDbType.Varchar, appId);
+        TenantDb.Add(cmd, "schedule", NpgsqlDbType.Varchar, scheduleId);
+        TenantDb.Add(cmd, "limit", NpgsqlDbType.Integer, Math.Clamp(limit, 1, 200));
+        var runs = new List<ScheduleRunLogEntry>();
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            runs.Add(new ScheduleRunLogEntry(
+                reader.GetInt64(0),
+                reader.GetFieldValue<DateTimeOffset>(1),
+                reader.GetFieldValue<DateTimeOffset>(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5)));
+        }
+
+        return runs;
     }
 
     // ------------------------------------------------------------------ internals
@@ -164,7 +217,7 @@ public sealed class ScheduleService(
             null,
             $"""
             UPDATE core.app_schedule SET next_run_at = @lease
-             WHERE app_id = @app AND schedule_id = @schedule {(onlyIfDue ? "AND next_run_at <= @now" : string.Empty)};
+             WHERE app_id = @app AND schedule_id = @schedule {(onlyIfDue ? "AND enabled AND next_run_at <= @now" : string.Empty)};
             """);
         TenantDb.Add(cmd, "app", NpgsqlDbType.Varchar, definition.OwnerApp);
         TenantDb.Add(cmd, "schedule", NpgsqlDbType.Varchar, definition.Id);
@@ -173,7 +226,7 @@ public sealed class ScheduleService(
         return await cmd.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
-    private async Task<ScheduleRunResult> RunClaimedAsync(ScheduleDefinition definition, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<ScheduleRunResult> RunClaimedAsync(ScheduleDefinition definition, DateTimeOffset now, string trigger, CancellationToken cancellationToken)
     {
         string status;
         string? message;
@@ -213,6 +266,26 @@ public sealed class ScheduleService(
         }
 
         await cmd.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var log = TenantDb.Create(
+            connection,
+            null,
+            """
+            INSERT INTO core.app_schedule_run (tenant_id, app_id, schedule_id, started_at, finished_at, trigger, status, message)
+            VALUES (current_setting('app.tenant_id')::uuid, @app, @schedule, @now, @finished, @trigger, @status, @message);
+            DELETE FROM core.app_schedule_run
+             WHERE app_id = @app AND schedule_id = @schedule
+               AND id NOT IN (SELECT id FROM core.app_schedule_run WHERE app_id = @app AND schedule_id = @schedule ORDER BY id DESC LIMIT 200);
+            """);
+        TenantDb.Add(log, "app", NpgsqlDbType.Varchar, definition.OwnerApp);
+        TenantDb.Add(log, "schedule", NpgsqlDbType.Varchar, definition.Id);
+        TenantDb.Add(log, "now", NpgsqlDbType.TimestampTz, now);
+        TenantDb.Add(log, "finished", NpgsqlDbType.TimestampTz, now);
+        TenantDb.Add(log, "trigger", NpgsqlDbType.Varchar, trigger);
+        TenantDb.Add(log, "status", NpgsqlDbType.Varchar, status);
+        TenantDb.Add(log, "message", NpgsqlDbType.Text, message);
+        await log.ExecuteNonQueryAsync(cancellationToken);
+
         return new ScheduleRunResult(definition.OwnerApp, definition.Id, status, message);
     }
 }

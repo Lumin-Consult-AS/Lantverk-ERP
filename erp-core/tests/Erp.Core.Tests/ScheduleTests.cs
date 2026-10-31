@@ -127,6 +127,38 @@ public sealed class ScheduleTests(PostgresDatabaseFixture fixture)
             {
                 Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
             }
+
+            // Stopped: the worker skips the job even when it is due, a manual run still works, and starting it again resumes it
+            using (var stop = await client.PostAsync("/api/v1/schedules/demo.ticker/demo.ticker.often/stop", null))
+            {
+                Assert.Equal(HttpStatusCode.NoContent, stop.StatusCode);
+            }
+
+            Assert.False((await ListAsync(client)).Single(s => s.GetProperty("scheduleId").GetString() == "demo.ticker.often").GetProperty("enabled").GetBoolean());
+            var farAhead = new DateTimeOffset(2026, 12, 1, 12, 0, 0, TimeSpan.Zero);
+            Assert.DoesNotContain("demo.ticker.often", (await worker.RunOnceAsync(farAhead, default)).Select(r => r.ScheduleId));
+            using (var manual = await client.PostAsync("/api/v1/schedules/demo.ticker/demo.ticker.often/run", null))
+            {
+                Assert.Equal(HttpStatusCode.OK, manual.StatusCode);
+            }
+
+            using (var start = await client.PostAsync("/api/v1/schedules/demo.ticker/demo.ticker.often/start", null))
+            {
+                Assert.Equal(HttpStatusCode.NoContent, start.StatusCode);
+            }
+
+            using (var stopUnknown = await client.PostAsync("/api/v1/schedules/demo.ticker/nope/stop", null))
+            {
+                Assert.Equal(HttpStatusCode.NotFound, stopUnknown.StatusCode);
+            }
+
+            // The run log keeps every run with its outcome, error message and what started it
+            var runs = (await client.GetFromJsonAsync<JsonElement>("/api/v1/schedules/demo.ticker/demo.ticker.often/runs")).EnumerateArray().ToList();
+            Assert.Equal("manual", runs[0].GetProperty("trigger").GetString());
+            var failedRun = runs.Single(r => r.GetProperty("status").GetString() == "failed");
+            Assert.Contains("nede", failedRun.GetProperty("message").GetString());
+            Assert.Equal("schedule", failedRun.GetProperty("trigger").GetString());
+            Assert.Contains(runs, r => r.GetProperty("status").GetString() == "ok");
         }
         finally
         {

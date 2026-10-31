@@ -11,6 +11,8 @@ Status: akseptert (31. oktober 2026). Valutadelen skal gjennomgås av regnskapsf
 - Jobbene kjører med tenantens administratorrolle, siden det ikke er noen person bak. Appen er den samme koden som uansett har tilgang til tenantens data gjennom data-API-et.
 - `GET /api/v1/schedules` viser jobbene og siste resultat; `POST /schedules/{app}/{id}/run` kjører en nå (kun administrator).
 
+- **Oversikt, start/stopp og logg (LUM-30).** `core.app_schedule.enabled` lar en administrator stoppe en jobb: arbeideren hopper over den, men «Kjør nå» virker fortsatt. Hver kjøring (tidsplan eller manuell) logges i `core.app_schedule_run` med status, melding/feil og hva som startet den; de siste 200 per jobb beholdes. API: `POST /schedules/{app}/{id}/start|stop` og `GET /schedules/{app}/{id}/runs`. Klienten har siden «Planlagte jobber» (kun administrator).
+
 ## Valuta i regnskapet (`finance`)
 
 - **Bokføringsvalutaen** er en innstilling per selskap (`finance.settings`), fordi apper ikke når selskapsdata i kjernen. Uten innstilling avvises linjer i fremmed valuta med beskjed om å sette den.

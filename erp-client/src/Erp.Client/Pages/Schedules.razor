@@ -1,0 +1,168 @@
+@page "/schedules"
+@inject ErpApiClient Api
+@inject I18nService I18n
+
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudText Typo="Typo.h6" Class="mb-2">@I18n.T("ui.schedules.title")</MudText>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">@I18n.T("ui.schedules.note")</MudText>
+
+    @if (_message is not null)
+    {
+        <MudAlert Severity="@(_isError ? Severity.Error : Severity.Success)" Class="my-3">@_message</MudAlert>
+    }
+
+    @if (_denied)
+    {
+        <MudAlert Severity="Severity.Warning" Class="my-3">@I18n.T("ui.users.adminOnly")</MudAlert>
+    }
+    else
+    {
+        <MudTable Items="_schedules" Dense="true" Hover="true" Class="mt-3">
+            <HeaderContent>
+                <MudTh>@I18n.T("ui.schedules.job")</MudTh>
+                <MudTh>@I18n.T("ui.schedules.timetable")</MudTh>
+                <MudTh>@I18n.T("ui.schedules.status")</MudTh>
+                <MudTh>@I18n.T("ui.schedules.next")</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    @context.Label<br />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@context.AppId</MudText>
+                </MudTd>
+                <MudTd>@Timetable(context)</MudTd>
+                <MudTd>
+                    @if (context.LastRunAt is null)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@I18n.T("ui.schedules.neverRun")</MudText>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="@(context.LastStatus == "ok" ? Color.Success : Color.Error)">
+                            @(context.LastStatus == "ok" ? I18n.T("ui.schedules.ok") : I18n.T("ui.schedules.failed"))
+                        </MudChip>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@context.LastRunAt.Value.ToLocalTime().ToString("g")</MudText>
+                    }
+                </MudTd>
+                <MudTd>
+                    @if (context.Enabled)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info">@I18n.T("ui.schedules.running")</MudChip>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@context.NextRunAt.ToLocalTime().ToString("g")</MudText>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default">@I18n.T("ui.schedules.stopped")</MudChip>
+                    }
+                </MudTd>
+                <MudTd>
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                               OnClick="@(() => ActAsync(context, "run"))">@I18n.T("ui.schedules.runNow")</MudButton>
+                    @if (context.Enabled)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => ActAsync(context, "stop"))">@I18n.T("ui.schedules.stop")</MudButton>
+                    }
+                    else
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => ActAsync(context, "start"))">@I18n.T("ui.schedules.start")</MudButton>
+                    }
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => ToggleLogAsync(context))">
+                        @(IsOpen(context) ? I18n.T("ui.schedules.hideLog") : I18n.T("ui.schedules.log"))
+                    </MudButton>
+                </MudTd>
+            </RowTemplate>
+            <ChildRowContent>
+                @if (IsOpen(context))
+                {
+                    <MudTd colspan="5">
+                        <MudText Typo="Typo.subtitle2" Class="mb-1">@I18n.T("ui.schedules.logTitle")</MudText>
+                        @if (_runs.Count == 0)
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@I18n.T("ui.schedules.noRuns")</MudText>
+                        }
+                        else
+                        {
+                            <MudTable Items="_runs" Dense="true" Elevation="0">
+                                <HeaderContent>
+                                    <MudTh>@I18n.T("ui.schedules.when")</MudTh>
+                                    <MudTh>@I18n.T("ui.schedules.trigger")</MudTh>
+                                    <MudTh>@I18n.T("ui.schedules.ok")</MudTh>
+                                    <MudTh>@I18n.T("ui.schedules.message")</MudTh>
+                                </HeaderContent>
+                                <RowTemplate Context="run">
+                                    <MudTd>@run.StartedAt.ToLocalTime().ToString("g")</MudTd>
+                                    <MudTd>@(run.Trigger == "manual" ? I18n.T("ui.schedules.triggerManual") : I18n.T("ui.schedules.triggerSchedule"))</MudTd>
+                                    <MudTd>
+                                        <MudChip T="string" Size="Size.Small" Color="@(run.Status == "ok" ? Color.Success : Color.Error)">
+                                            @(run.Status == "ok" ? I18n.T("ui.schedules.ok") : I18n.T("ui.schedules.failed"))
+                                        </MudChip>
+                                    </MudTd>
+                                    <MudTd Style="white-space: pre-wrap;">@run.Message</MudTd>
+                                </RowTemplate>
+                            </MudTable>
+                        }
+                    </MudTd>
+                }
+            </ChildRowContent>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private List<ClientSchedule> _schedules = [];
+    private List<ClientScheduleRun> _runs = [];
+    private (string App, string Id)? _open;
+    private string? _message;
+    private bool _isError;
+    private bool _denied;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _schedules = (await Api.GetSchedulesAsync()).ToList();
+            _denied = false;
+            if (_open is { } open)
+            {
+                _runs = (await Api.GetScheduleRunsAsync(open.App, open.Id)).ToList();
+            }
+        }
+        catch (Exception)
+        {
+            _denied = true;
+        }
+    }
+
+    private string Timetable(ClientSchedule s) =>
+        s.EveryMinutes is { } minutes
+            ? string.Format(I18n.T("ui.schedules.every"), minutes)
+            : string.Format(I18n.T("ui.schedules.daily"), s.At);
+
+    private bool IsOpen(ClientSchedule s) => _open == (s.AppId, s.ScheduleId);
+
+    private async Task ToggleLogAsync(ClientSchedule s)
+    {
+        _open = IsOpen(s) ? null : (s.AppId, s.ScheduleId);
+        _runs = [];
+        await LoadAsync();
+    }
+
+    private async Task ActAsync(ClientSchedule s, string action)
+    {
+        try
+        {
+            await Api.ScheduleActionAsync(s.AppId, s.ScheduleId, action);
+            _message = I18n.T("ui.schedules.done");
+            _isError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message;
+            _isError = true;
+        }
+
+        await LoadAsync();
+    }
+}

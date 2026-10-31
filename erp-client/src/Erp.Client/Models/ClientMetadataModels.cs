@@ -57,6 +57,32 @@ public sealed class ClientAdminUser
     public bool IsActive { get; set; }
 }
 
+/// <summary>A scheduled job of an installed app and what it last did (administrator overview).</summary>
+public sealed class ClientSchedule
+{
+    public string AppId { get; set; } = string.Empty;
+    public string ScheduleId { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string CommandId { get; set; } = string.Empty;
+    public string? At { get; set; }
+    public int? EveryMinutes { get; set; }
+    public DateTimeOffset NextRunAt { get; set; }
+    public DateTimeOffset? LastRunAt { get; set; }
+    public string? LastStatus { get; set; }
+    public string? LastMessage { get; set; }
+    public bool Enabled { get; set; }
+}
+
+public sealed class ClientScheduleRun
+{
+    public long Id { get; set; }
+    public DateTimeOffset StartedAt { get; set; }
+    public DateTimeOffset FinishedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Message { get; set; }
+}
+
 public sealed class ClientInstalledAppSummary
 {
     public string AppId { get; set; } = string.Empty;
