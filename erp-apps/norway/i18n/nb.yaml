@@ -9,6 +9,8 @@ norway:
     title: MVA-posteringer
   vatreturns:
     title: MVA-oppgjør
+  saftexports:
+    title: SAF-T-eksport
   card:
     general: Generelt
     result: Resultat
@@ -34,3 +36,19 @@ norway:
     endDate: Til dato
     payable: Å betale
     status: Status
+    companyName: Firmanavn
+    organizationNumber: Organisasjonsnummer
+    vatRegistered: MVA-registrert
+    street: Gateadresse
+    postalCode: Postnummer
+    city: Sted
+    fromDate: Fra dato
+    toDate: Til dato
+    file: Fil
+    fileName: Filnavn
+    message: Melding
+    transactionCount: Antall bilag
+    contactFirstName: Kontaktperson, fornavn
+    contactLastName: Kontaktperson, etternavn
+    telephone: Telefon
+    email: E-post

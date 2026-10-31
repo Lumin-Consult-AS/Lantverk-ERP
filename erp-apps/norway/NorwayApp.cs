@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 using Erp.Sdk;
+using Norway.Saft;
 
 namespace Norway;
 
@@ -9,6 +10,8 @@ public sealed record FiscalYearCreated(Guid FiscalyearId);
 public sealed record SetupRequested(Guid SettingsId);
 
 public sealed record JournalPosted(Guid EntryId, Guid VoucherId);
+
+public sealed record SaftExportRequested(Guid ExportId);
 
 /// <summary>
 /// Everything Norwegian in the accounting: the standard chart of accounts (NS 4102) with SAF-T standard accounts, the VAT
@@ -19,7 +22,7 @@ public sealed record JournalPosted(Guid EntryId, Guid VoucherId);
 public sealed class NorwayApp : AppBase
 {
     /// <summary>Bump when the chart or the VAT codes shipped with the app change; the set-up then runs again (adds what is missing).</summary>
-    public const string ChartVersion = "2026.1";
+    public const string ChartVersion = "2026.2";
 
     private const string Settings = "norway.settings";
     private const string VatCode = "norway.vatcode";
@@ -27,6 +30,7 @@ public sealed class NorwayApp : AppBase
     private const string VatEntry = "norway.vatentry";
     private const string VatReturn = "norway.vatreturn";
     private const string VatReturnLine = "norway.vatreturnline";
+    private const string SaftExport = "norway.saftexport";
     private const string Account = "finance.account";
     private const string Voucher = "finance.voucher";
     private const string Line = "finance.voucherline";
@@ -34,7 +38,8 @@ public sealed class NorwayApp : AppBase
 
     private const string LineVatCode = "norway.vatCode";
     private const string LineVatSource = "norway.vatSourceLine";
-    private const string AccountStandard = "norway.standardAccount";
+    private const string AccountCategory = "norway.groupingCategory";
+    private const string AccountCode = "norway.groupingCode";
 
     // ------------------------------------------------------------------ set-up: chart of accounts and VAT codes
 
@@ -80,7 +85,8 @@ public sealed class NorwayApp : AppBase
                 ["name"] = row["name"],
                 ["accountType"] = row["type"],
                 ["controlType"] = row["control"],
-                [AccountStandard] = row["standardAccount"]
+                [AccountCategory] = row["groupingCategory"],
+                [AccountCode] = row["groupingCode"]
             });
             accounts[row["number"]] = account.Id;
         }
@@ -402,6 +408,73 @@ public sealed class NorwayApp : AppBase
             ["basis"] = basis,
             ["vatAmount"] = vat
         });
+
+    // ------------------------------------------------------------------ SAF-T export
+
+    [OnValidate(SaftExport)]
+    public ValidationResult ValidateExport(Record export, Erp.Sdk.AppContext ctx) =>
+        export.Get<DateOnly?>("fromDate") is { } from && export.Get<DateOnly?>("toDate") is { } to && to < from
+            ? ValidationResult.Error("toDate", "Til dato kan ikke være før fra dato.")
+            : ValidationResult.Ok;
+
+    /// <summary>A new export is made in the background (it can take longer than a hook may), so the request is an event.</summary>
+    [OnAfterSave(SaftExport)]
+    public async Task AfterExportSaved(Record export, Erp.Sdk.AppContext ctx)
+    {
+        if (export.Get<string>("status") == "requested")
+        {
+            await ctx.Events.PublishAsync("norway.saftexport.requested@1", export.Id.ToString(), new { exportId = export.Id });
+        }
+    }
+
+    /// <summary>
+    /// Makes the SAF-T Financial file for the period, checks it against Skatteetaten's schema, stores it and records the
+    /// result on the request. A file that does not pass the schema is never handed out. Safe to deliver again.
+    /// </summary>
+    [OnEvent("norway.saftexport.requested@1")]
+    public async Task OnSaftExportRequested(SaftExportRequested e, Erp.Sdk.AppContext ctx)
+    {
+        var export = await ctx.Data.GetAsync(SaftExport, e.ExportId);
+        if (export is null || export.Get<string>("status") != "requested")
+        {
+            return;
+        }
+
+        var from = export.Get<DateOnly>("fromDate");
+        var to = export.Get<DateOnly>("toDate");
+        var result = new Dictionary<string, object?>();
+        try
+        {
+            var data = await SaftExporter.LoadAsync(ctx, from, to);
+            var xml = SaftXml.Write(data);
+            var errors = SaftXml.Validate(xml);
+            if (errors.Count > 0)
+            {
+                throw new SaftExportException($"Filen følger ikke Skatteetatens skjema (v{SaftXml.SchemaVersion}): {string.Join(" | ", errors.Take(5))}");
+            }
+
+            var fileName = $"SAF-T_{data.Company.RegistrationNumber ?? "firma"}_{from:yyyyMMdd}-{to:yyyyMMdd}.xml";
+            result["file"] = await ctx.Documents.StoreDocumentAsync(fileName, "application/xml", xml);
+            result["fileName"] = fileName;
+            result["transactionCount"] = data.Transactions.Count;
+            result["message"] = $"SAF-T Regnskap v{SaftXml.SchemaVersion} ({data.Transactions.Count} bilag) er laget og sjekket mot Skatteetatens skjema.";
+            result["status"] = "done";
+        }
+        catch (SaftExportException ex)
+        {
+            result["message"] = ex.Message;
+            result["status"] = "failed";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Whatever else goes wrong is recorded on the request too, so the person asking is not left waiting
+            result["message"] = $"Eksporten feilet: {ex.Message}";
+            result["status"] = "failed";
+        }
+
+        var current = await ctx.Data.GetAsync(SaftExport, e.ExportId) ?? export;
+        await ctx.Data.UpdateAsync(SaftExport, current.Id, current.RowVersion, result);
+    }
 
     // ------------------------------------------------------------------ the VAT return per term
 

@@ -13,5 +13,6 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Data\*.csv" LogicalName="Norway.Data.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Schemas\*.xsd" LogicalName="Norway.Schemas.%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

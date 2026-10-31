@@ -250,6 +250,10 @@ message StartWorkflowResponse {
 service DocumentService {
   rpc GetDocument (GetDocumentRequest) returns (GetDocumentResponse);
 
+  // An app stores a file it has generated (an export, a report). The file is scanned like any upload and can be fetched
+  // through the file API by anyone allowed to read files.
+  rpc StoreDocument (StoreDocumentRequest) returns (StoreDocumentResponse);
+
   // Inbox items: an app claims an item, processes it, and completes or rejects it. Claiming is atomic.
   rpc ClaimInboxItem (InboxItemActionRequest) returns (InboxItemProto);
   rpc ReleaseInboxItem (InboxItemActionRequest) returns (InboxItemProto);
@@ -281,6 +285,20 @@ message InboxItemProto {
   repeated string file_ids = 9;
   repeated string duplicate_file_ids = 10;
   string claimed_by = 11;
+}
+
+message StoreDocumentRequest {
+  CallContextProto context = 1;
+  string file_name = 2;
+  string content_type = 3;
+  bytes content = 4;
+}
+
+message StoreDocumentResponse {
+  string file_id = 1;
+  string sha256 = 2;
+  // The same content was already stored for the company; file_id is the existing file.
+  bool duplicate = 3;
 }
 
 message GetDocumentRequest {

@@ -9,6 +9,8 @@ norway:
     title: VAT entries
   vatreturns:
     title: VAT returns
+  saftexports:
+    title: SAF-T export
   card:
     general: General
     result: Result
@@ -34,3 +36,19 @@ norway:
     endDate: To date
     payable: Payable
     status: Status
+    companyName: Company name
+    organizationNumber: Organization number
+    vatRegistered: VAT registered
+    street: Street
+    postalCode: Postal code
+    city: City
+    fromDate: From date
+    toDate: To date
+    file: File
+    fileName: File name
+    message: Message
+    transactionCount: Entries
+    contactFirstName: Contact, first name
+    contactLastName: Contact, last name
+    telephone: Telephone
+    email: E-mail

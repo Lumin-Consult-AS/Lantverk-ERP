@@ -1,0 +1,12 @@
+id: norway.saftexport-list
+type: list
+object: norway.saftexport
+title: norway.saftexports.title
+columns:
+  - fromDate
+  - toDate
+  - status
+  - transactionCount
+  - fileName
+  - message
+  - file

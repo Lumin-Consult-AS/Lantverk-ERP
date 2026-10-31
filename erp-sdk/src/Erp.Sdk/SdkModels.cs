@@ -382,6 +382,9 @@ public interface IAppDocumentClient
 {
     Task<AppDocumentFile?> GetDocumentAsync(Guid fileId, CancellationToken cancellationToken = default);
 
+    /// <summary>Stores a file the app generated (an export, a report) and returns its id; the file API serves it for download.</summary>
+    Task<Guid> StoreDocumentAsync(string fileName, string contentType, byte[] content, CancellationToken cancellationToken = default);
+
     /// <summary>Takes an unclaimed inbox item. Throws an <c>RpcException</c> with <c>Aborted</c> when someone else has it.</summary>
     Task<AppInboxItem> ClaimInboxItemAsync(Guid itemId, string claimant, CancellationToken cancellationToken = default);
 
