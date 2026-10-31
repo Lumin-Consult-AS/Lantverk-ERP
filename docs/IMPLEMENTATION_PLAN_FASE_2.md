@@ -44,7 +44,7 @@ Disse må avgjøres av deg før respektive steg starter. Kodeagenten stopper og 
 - **Uforanderlige objekter**: et objekt kan erklæres uforanderlig etter en gitt status (bokført). Databasen avviser UPDATE og DELETE på slike rader (trigger), ikke bare API-et. Korreksjon skjer med motpostering (regel 5).
 - **Aggregering i data-API-et** (se B3): sum, antall, min/maks og gruppering med filter, med samme tillatelser og tenant-regler som vanlig spørring.
 - **Bruker- og rolleadministrasjon**: API og klientside for å opprette brukere og gi roller (funnet under demoen: det finnes ikke i dag, og godkjenningsflyt og tillatelser trenger det).
-- **Opprydding fra fase 1**: S3-adapteren kjørt mot en ekte Scaleway-bucket; publisering av `erp-samples` ligger fortsatt utsatt (ADR-0015).
+- **Utsatt fra steg 0 (egen sak F2-12):** S3-adapteren kjørt mot en ekte Scaleway-bucket; må gjøres før første pilot. Publisering av `erp-samples` ligger fortsatt utsatt (ADR-0015).
 
 **Ferdig når** en testapp kan bruke en hullfri nummerserie, et uforanderlig objekt avvises ved endring også via direkte SQL som applikasjonsrollen, og en aggregeringsspørring gir riktig sum per gruppe for kun egen tenant (tester som beviser at data ikke lekker).
 
