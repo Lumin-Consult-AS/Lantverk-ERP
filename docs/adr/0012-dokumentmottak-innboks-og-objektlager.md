@@ -42,6 +42,7 @@ Innkommende dokumenter (fakturaer, bilag, avtaler) skal havne i systemet, kunne 
 ## Avgrensninger
 - **Brevos webhook-format** er implementert etter dokumentasjonen og testet mot en gjenskapt payload, ikke mot en levende Brevo-konto. Verifiser mot første ekte e-post.
 - **S3-adapteren** er testet mot en ekte S3-server bare når `ERP_TEST_S3_IMAGE` peker på et MinIO-kompatibelt bilde (`minio/minio` finnes ikke lenger på Docker Hub); ellers hoppes disse testene over og appen testes mot en lagring i minnet med samme låseregler. Adapteren er ikke kjørt mot Scaleway.
+- **Valgt bilde lokalt:** `pgsty/minio:latest` (i `docker-compose.yml`). Kjør S3-testene med `ERP_TEST_S3_IMAGE=pgsty/minio:latest dotnet test`. Med det ble tre feil i adapteren funnet og rettet: tom bucket-liste ga null, signering av innhold var snudd for http/https, og «WORM protected» ble ikke kjent igjen som låst objekt.
 - **PDF-rendereren** er skrevet men ikke bygget eller kjørt (Playwright-bildet er ikke hentet); klienten og malen er testet mot en fake.
 - Ikke bygget: lagringsklasser/arkiv, kryptering i hvile utover leverandørens, opplasting i klienten, AI-tolkning, EHF/PEPPOL, OCR (utsatt i planen).
 - Oppbevaringsregler leses fra konfigurasjon, ikke fra tenantens data; redigering i klienten kan komme senere.
