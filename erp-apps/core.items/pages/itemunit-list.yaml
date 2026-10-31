@@ -1,0 +1,7 @@
+id: core.itemunit-list
+type: list
+object: core.itemunit
+title: items.units.title
+columns:
+  - code
+  - name

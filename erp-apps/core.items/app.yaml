@@ -1,0 +1,139 @@
+id: core.items
+version: 1.0.0
+name: Varer
+publisher: Laftverk
+license: proprietary
+sdk: ">=1.0.0 <2.0.0"
+
+enums:
+  core.itemtype: [goods, service]
+
+objects:
+  core.itemunit:
+    label: Enhet
+    fields:
+      code:
+        type: string
+        required: true
+        maxLength: 10
+        label: Kode
+      name:
+        type: string
+        required: true
+        maxLength: 100
+        label: Navn
+    keys:
+      - name: uk_itemunit_code
+        fields: [code]
+        scopeToCompany: true
+
+  core.itemgroup:
+    label: Varegruppe
+    fields:
+      code:
+        type: string
+        required: true
+        maxLength: 20
+        label: Kode
+      name:
+        type: string
+        required: true
+        maxLength: 100
+        label: Navn
+    keys:
+      - name: uk_itemgroup_code
+        fields: [code]
+        scopeToCompany: true
+
+  core.item:
+    label: Vare
+    fields:
+      itemNumber:
+        type: string
+        required: true
+        maxLength: 32
+        label: Varenummer
+      name:
+        type: string
+        required: true
+        maxLength: 200
+        label: Navn
+      description:
+        type: text
+        label: Beskrivelse
+      itemType:
+        type: enum
+        of: core.itemtype
+        required: true
+        default: goods
+        label: Type
+      unit:
+        type: reference
+        to: core.itemunit
+        required: true
+        label: Enhet
+      itemGroup:
+        type: reference
+        to: core.itemgroup
+        label: Varegruppe
+      isActive:
+        type: boolean
+        required: true
+        default: true
+        label: Aktiv
+    keys:
+      - name: uk_item_number
+        fields: [itemNumber]
+        scopeToCompany: true
+
+  core.itembarcode:
+    label: Strekkode
+    fields:
+      item:
+        type: reference
+        to: core.item
+        required: true
+        onDelete: cascade
+        label: Vare
+      barcode:
+        type: string
+        required: true
+        maxLength: 50
+        label: Strekkode
+      isPrimary:
+        type: boolean
+        required: true
+        default: false
+        label: Primær
+    keys:
+      - name: uk_itembarcode_barcode
+        fields: [barcode]
+        scopeToCompany: true
+
+events:
+  publishes:
+    - core.item.created@1
+    - core.item.updated@1
+    - core.item.deleted@1
+
+pages:
+  - pages/item-list.yaml
+  - pages/item-card.yaml
+  - pages/itemunit-list.yaml
+  - pages/itemgroup-list.yaml
+
+permissionSets:
+  - id: core.items.reader
+    label: Varer – lesetilgang
+    grants:
+      core.item: [read]
+      core.itemunit: [read]
+      core.itemgroup: [read]
+      core.itembarcode: [read]
+  - id: core.items.manager
+    label: Varer – full tilgang
+    grants:
+      core.item: [read, create, update, delete]
+      core.itemunit: [read, create, update, delete]
+      core.itemgroup: [read, create, update, delete]
+      core.itembarcode: [read, create, update, delete]

@@ -1,0 +1,12 @@
+dimensions:
+  list:
+    title: Dimensjoner
+  card:
+    general: Generelt
+    values: Verdier
+  fields:
+    code: Kode
+    name: Navn
+    isActive: Aktiv
+    validFrom: Gyldig fra
+    validTo: Gyldig til

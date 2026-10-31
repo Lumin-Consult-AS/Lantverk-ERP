@@ -1,0 +1,8 @@
+id: core.dimension-list
+type: list
+object: core.dimension
+title: dimensions.list.title
+columns:
+  - code
+  - name
+  - isActive
