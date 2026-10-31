@@ -1,0 +1,22 @@
+id: core.dimension-card
+type: card
+object: core.dimension
+title: "{code} – {name}"
+groups:
+  - label: dimensions.card.general
+    fields:
+      - code
+      - name
+      - isActive
+tabs:
+  - label: dimensions.card.values
+    list:
+      object: core.dimensionvalue
+      filter:
+        dimension: "{id}"
+      fields:
+        - code
+        - name
+        - validFrom
+        - validTo
+        - isActive

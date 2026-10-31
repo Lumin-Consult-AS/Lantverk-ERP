@@ -1,0 +1,25 @@
+id: core.item-card
+type: card
+object: core.item
+title: "{itemNumber} – {name}"
+groups:
+  - label: items.card.general
+    fields:
+      - itemNumber
+      - name
+      - itemType
+      - unit
+      - itemGroup
+      - isActive
+  - label: items.card.description
+    fields:
+      - description
+tabs:
+  - label: items.card.barcodes
+    list:
+      object: core.itembarcode
+      filter:
+        item: "{id}"
+      fields:
+        - barcode
+        - isPrimary

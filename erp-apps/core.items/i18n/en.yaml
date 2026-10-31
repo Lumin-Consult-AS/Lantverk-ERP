@@ -1,0 +1,21 @@
+items:
+  list:
+    title: Items
+  units:
+    title: Units
+  groups:
+    title: Item groups
+  card:
+    general: General
+    description: Description
+    barcodes: Barcodes
+  fields:
+    itemNumber: Item number
+    name: Name
+    itemType: Type
+    unit: Unit
+    itemGroup: Item group
+    isActive: Active
+    code: Code
+    barcode: Barcode
+    isPrimary: Primary

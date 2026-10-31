@@ -1,0 +1,21 @@
+items:
+  list:
+    title: Varer
+  units:
+    title: Enheter
+  groups:
+    title: Varegrupper
+  card:
+    general: Generelt
+    description: Beskrivelse
+    barcodes: Strekkoder
+  fields:
+    itemNumber: Varenummer
+    name: Navn
+    itemType: Type
+    unit: Enhet
+    itemGroup: Varegruppe
+    isActive: Aktiv
+    code: Kode
+    barcode: Strekkode
+    isPrimary: Primær

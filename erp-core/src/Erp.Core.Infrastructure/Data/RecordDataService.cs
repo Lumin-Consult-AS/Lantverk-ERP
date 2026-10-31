@@ -1725,6 +1725,19 @@ public sealed class RecordDataService(
                     throw new RecordValidationException(pg.MessageText, null);
                 }
 
+                // Business keys and references are enforced by the database; the caller gets a readable error, not a 500.
+                if (ex is PostgresException { SqlState: "23505" } duplicate)
+                {
+                    throw new RecordValidationException(
+                        $"A record with the same key already exists ({duplicate.ConstraintName}).", null);
+                }
+
+                if (ex is PostgresException { SqlState: "23503" } reference)
+                {
+                    throw new RecordValidationException(
+                        $"The record refers to a record that does not exist, or is still referred to by others ({reference.ConstraintName}).", null);
+                }
+
                 throw;
             }
             finally

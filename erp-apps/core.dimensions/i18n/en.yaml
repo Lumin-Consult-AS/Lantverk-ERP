@@ -1,0 +1,12 @@
+dimensions:
+  list:
+    title: Dimensions
+  card:
+    general: General
+    values: Values
+  fields:
+    code: Code
+    name: Name
+    isActive: Active
+    validFrom: Valid from
+    validTo: Valid to

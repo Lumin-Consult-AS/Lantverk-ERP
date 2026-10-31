@@ -1,0 +1,11 @@
+id: core.item-list
+type: list
+object: core.item
+title: items.list.title
+columns:
+  - itemNumber
+  - name
+  - itemType
+  - unit
+  - itemGroup
+  - isActive

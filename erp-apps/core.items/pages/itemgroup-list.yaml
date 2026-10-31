@@ -1,0 +1,7 @@
+id: core.itemgroup-list
+type: list
+object: core.itemgroup
+title: items.groups.title
+columns:
+  - code
+  - name
