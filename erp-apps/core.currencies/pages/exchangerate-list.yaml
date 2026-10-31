@@ -1,0 +1,10 @@
+id: core.exchangerate-list
+type: list
+object: core.exchangerate
+title: currencies.list.title
+columns:
+  - rateDate
+  - fromCurrency
+  - toCurrency
+  - rate
+  - source

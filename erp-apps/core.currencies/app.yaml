@@ -1,0 +1,60 @@
+id: core.currencies
+version: 1.0.0
+name: Valutakurser
+publisher: Laftverk
+license: proprietary
+sdk: ">=1.0.0 <2.0.0"
+
+# Kurser per dato og valutapar. Valutaene selv (ISO-koder) er kjerneobjekter; kursene refererer dem med kode.
+# En kurs sier hvor mange enheter av toCurrency én enhet av fromCurrency er verdt den datoen.
+objects:
+  core.exchangerate:
+    label: Valutakurs
+    fields:
+      fromCurrency:
+        type: string
+        required: true
+        maxLength: 3
+        pattern: "^[A-Z]{3}$"
+        label: Fra valuta
+      toCurrency:
+        type: string
+        required: true
+        maxLength: 3
+        pattern: "^[A-Z]{3}$"
+        label: Til valuta
+      rateDate:
+        type: date
+        required: true
+        label: Dato
+      rate:
+        type: decimal
+        required: true
+        scale: 8
+        minValue: 0.00000001
+        label: Kurs
+      source:
+        type: string
+        maxLength: 100
+        label: Kilde
+    keys:
+      - name: uk_exchangerate_pair_date
+        fields: [fromCurrency, toCurrency, rateDate]
+        scopeToCompany: true
+
+events:
+  publishes:
+    - core.exchangerate.created@1
+
+pages:
+  - pages/exchangerate-list.yaml
+
+permissionSets:
+  - id: core.currencies.reader
+    label: Valutakurser – lesetilgang
+    grants:
+      core.exchangerate: [read]
+  - id: core.currencies.manager
+    label: Valutakurser – full tilgang
+    grants:
+      core.exchangerate: [read, create, update, delete]

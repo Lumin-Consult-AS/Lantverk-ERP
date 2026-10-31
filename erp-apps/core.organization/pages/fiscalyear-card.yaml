@@ -1,0 +1,32 @@
+id: core.fiscalyear-card
+type: card
+object: core.fiscalyear
+title: "{year}"
+groups:
+  - label: organization.card.general
+    fields:
+      - year
+      - startDate
+      - endDate
+      - status
+actions:
+  - id: close
+    label: organization.actions.close
+    transition: close
+    placement: primary
+  - id: reopen
+    label: organization.actions.reopen
+    transition: reopen
+    placement: secondary
+tabs:
+  - label: organization.card.periods
+    list:
+      object: core.fiscalperiod
+      filter:
+        fiscalYear: "{id}"
+      fields:
+        - number
+        - name
+        - startDate
+        - endDate
+        - status

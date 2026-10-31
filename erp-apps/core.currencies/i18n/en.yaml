@@ -1,0 +1,9 @@
+currencies:
+  list:
+    title: Exchange rates
+  fields:
+    fromCurrency: From currency
+    toCurrency: To currency
+    rateDate: Date
+    rate: Rate
+    source: Source

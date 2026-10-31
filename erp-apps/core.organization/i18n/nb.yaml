@@ -1,0 +1,16 @@
+organization:
+  list:
+    title: Regnskapsår
+  card:
+    general: Generelt
+    periods: Perioder
+  actions:
+    close: Steng
+    reopen: Åpne igjen
+  fields:
+    year: År
+    startDate: Fra dato
+    endDate: Til dato
+    status: Status
+    number: Periode
+    name: Navn
