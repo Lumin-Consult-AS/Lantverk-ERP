@@ -1,0 +1,5 @@
+fx:
+  settings:
+    title: Kursoppdatering
+  fields:
+    currencies: Valutaer

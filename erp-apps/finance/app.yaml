@@ -9,6 +9,7 @@ dependencies:
   core.parties: ">=1.0.0 <2.0.0"
   core.dimensions: ">=1.0.0 <2.0.0"
   core.organization: ">=1.0.0 <2.0.0"
+  core.currencies: ">=1.0.0 <2.0.0"
 
 runtime:
   image: ghcr.io/laftverk/finance:1.0.0
@@ -22,9 +23,32 @@ enums:
   finance.voucherstatus: [draft, posted]
   finance.openitemstatus: [open, settled]
   finance.settlementstatus: [draft, completed]
+  finance.side: [debit, credit]
 
 # Landsuavhengig hovedbok. Alt norsk (kontoplan, MVA, SAF-T) ligger i Norge-pakken.
 objects:
+  # Én post per selskap: selskapets bokføringsvaluta. Kjernen eier selskapet, men apper når ikke selskapsdata gjennom
+  # data-API-et, så regnskapsappen har sin egen innstilling.
+  finance.settings:
+    label: Regnskapsinnstillinger
+    fields:
+      singleton:
+        type: string
+        required: true
+        maxLength: 20
+        default: settings
+        label: Nøkkel
+      baseCurrency:
+        type: string
+        required: true
+        maxLength: 3
+        pattern: "^[A-Z]{3}$"
+        label: Bokføringsvaluta
+    keys:
+      - name: uk_settings_company
+        fields: [singleton]
+        scopeToCompany: true
+
   finance.account:
     label: Konto
     fields:
@@ -142,6 +166,8 @@ objects:
         type: reference
         to: core.dimensionvalue
         label: Dimensjon 3
+      # Fremmed valuta: oppgi valuta, beløp i valuta og side. Appen slår opp kursen på bilagsdatoen (eller bruker kursen
+      # du har satt selv) og regner ut debet eller kredit i bokføringsvalutaen.
       currency:
         type: string
         maxLength: 3
@@ -152,6 +178,10 @@ objects:
         scale: 2
         minValue: 0
         label: Beløp i valuta
+      currencySide:
+        type: enum
+        of: finance.side
+        label: Side (valutalinje)
       exchangeRate:
         type: decimal
         scale: 8
@@ -394,6 +424,7 @@ events:
     - core.fiscalyear.created@1: OnFiscalYearCreated
 
 pages:
+  - pages/settings-list.yaml
   - pages/account-list.yaml
   - pages/voucher-list.yaml
   - pages/voucher-card.yaml
@@ -403,9 +434,14 @@ pages:
   - pages/openitem-list.yaml
 
 permissionSets:
+  - id: finance.admin
+    label: Regnskap – innstillinger
+    grants:
+      finance.settings: [read, create, update]
   - id: finance.reader
     label: Regnskap – lesetilgang
     grants:
+      finance.settings: [read]
       finance.account: [read]
       finance.voucher: [read]
       finance.voucherline: [read]
@@ -417,6 +453,7 @@ permissionSets:
   - id: finance.bookkeeper
     label: Regnskap – bokføring
     grants:
+      finance.settings: [read]
       finance.account: [read, create, update]
       finance.voucher: [read, create, update, delete, post]
       finance.voucherline: [read, create, update, delete]

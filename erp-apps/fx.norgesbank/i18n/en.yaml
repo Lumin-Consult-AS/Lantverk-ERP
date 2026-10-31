@@ -1,0 +1,5 @@
+fx:
+  settings:
+    title: Rate updates
+  fields:
+    currencies: Currencies

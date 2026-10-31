@@ -18,10 +18,13 @@ public sealed class FinanceApp : AppBase
     private const string Posting = "finance.posting";
     private const string OpenItem = "finance.openitem";
     private const string Account = "finance.account";
+    private const string Settings = "finance.settings";
+    private const string ExchangeRate = "core.exchangerate";
     private const string Settlement = "finance.settlement";
     private const string SettlementItem = "finance.settlementitem";
 
     private static readonly string[] DimensionFields = ["dimension1", "dimension2", "dimension3"];
+    private static readonly string[] CurrencyFields = ["currency", "currencyAmount", "currencySide", "exchangeRate"];
 
     // ------------------------------------------------------------------ vouchers
 
@@ -52,6 +55,8 @@ public sealed class FinanceApp : AppBase
         }
 
         decimal debit = 0, credit = 0;
+        string? baseCurrency = null;
+        var baseCurrencyLoaded = false;
         var accounts = new Dictionary<Guid, Record?>();
         foreach (var line in lines)
         {
@@ -80,10 +85,31 @@ public sealed class FinanceApp : AppBase
                 failures.Add(new ValidationFailure("lines", $"Konto {account.Get<string>("number")} er en reskontrokonto, så linjen må ha en part."));
             }
 
-            if (!string.IsNullOrEmpty(line.Get<string>("currency"))
-                && (line.Get<decimal>("exchangeRate") <= 0 || line.Get<decimal>("currencyAmount") <= 0))
+            var currency = line.Get<string>("currency");
+            if (!string.IsNullOrEmpty(currency))
             {
-                failures.Add(new ValidationFailure("lines", "En linje i fremmed valuta må ha beløp i valuta og kurs."));
+                if (!baseCurrencyLoaded)
+                {
+                    baseCurrency = await GetBaseCurrencyAsync(ctx);
+                    baseCurrencyLoaded = true;
+                }
+
+                var foreignAmount = line.Get<decimal>("currencyAmount");
+                var rate = line.Get<decimal>("exchangeRate");
+                if (baseCurrency is null || currency == baseCurrency || foreignAmount <= 0 || rate <= 0)
+                {
+                    failures.Add(new ValidationFailure("lines", $"Linjen i {currency} er ufullstendig: den trenger beløp i valuta og kurs, og valutaen må være en annen enn bokføringsvalutaen."));
+                }
+                else
+                {
+                    var expected = Math.Round(foreignAmount * rate, 2, MidpointRounding.AwayFromZero);
+                    var actual = d > 0 ? d : c;
+                    if (actual != expected)
+                    {
+                        failures.Add(new ValidationFailure(
+                            "lines", $"Linjen i {currency} stemmer ikke med kursen: {foreignAmount:0.00} × {rate} = {expected:0.00} {baseCurrency}, men linjen har {actual:0.00}."));
+                    }
+                }
             }
         }
 
@@ -210,6 +236,7 @@ public sealed class FinanceApp : AppBase
                 ["party"] = p.Get<Guid?>("party"),
                 ["currency"] = p.Get<string>("currency"),
                 ["currencyAmount"] = p.Get<decimal?>("currencyAmount"),
+                ["currencySide"] = p.Get<string>("currency") is null ? null : (p.Get<decimal>("credit") > 0 ? "debit" : "credit"),
                 ["exchangeRate"] = p.Get<decimal?>("exchangeRate")
             };
             foreach (var dimension in DimensionFields)
@@ -238,6 +265,111 @@ public sealed class FinanceApp : AppBase
         }
 
         return ValidationResult.Ok;
+    }
+
+    // ------------------------------------------------------------------ foreign currency
+
+    /// <summary>
+    /// A line in a foreign currency is given as currency, amount and side. The app finds the rate on the voucher date
+    /// (or uses the one set on the line) and works out debit or credit in the base currency. The rate is then fixed on the
+    /// line; posting checks that the line still agrees with it.
+    /// </summary>
+    [OnBeforeSave(Line)]
+    public async Task<ValidationResult> ConvertForeignLine(Record line, Erp.Sdk.AppContext ctx)
+    {
+        if (!CurrencyFields.Any(f => line.Fields.ContainsKey(f)))
+        {
+            return ValidationResult.Ok;
+        }
+
+        // Null for a new line; for a change, the fields the change does not mention come from the stored line.
+        var existing = await ctx.Data.GetAsync(Line, line.Id);
+        T? Value<T>(string field) => line.Fields.ContainsKey(field) ? line.Get<T>(field) : existing is null ? default : existing.Get<T>(field);
+
+        var currency = Value<string>("currency");
+        if (string.IsNullOrEmpty(currency))
+        {
+            return ValidationResult.Ok;
+        }
+
+        var baseCurrency = await GetBaseCurrencyAsync(ctx);
+        if (baseCurrency is null)
+        {
+            return ValidationResult.Error("currency", "Sett bokføringsvalutaen under Regnskapsinnstillinger før du bruker fremmed valuta.");
+        }
+
+        if (currency == baseCurrency)
+        {
+            // Not a foreign currency after all: the line is an ordinary one.
+            foreach (var field in CurrencyFields)
+            {
+                line.Set(field, null);
+            }
+
+            return ValidationResult.Ok;
+        }
+
+        var amount = Value<decimal?>("currencyAmount");
+        var side = Value<string>("currencySide");
+        if (amount is not > 0 || side is not ("debit" or "credit"))
+        {
+            return ValidationResult.Error("currencyAmount", "En linje i fremmed valuta må ha beløp i valuta (over 0) og side (debet eller kredit).");
+        }
+
+        // A rate set by hand wins; otherwise the stored rate is kept while the currency is the same; otherwise it is looked up.
+        decimal? rate = line.Fields.ContainsKey("exchangeRate") ? line.Get<decimal?>("exchangeRate") : null;
+        if (rate is not > 0 && existing is not null && existing.Get<string>("currency") == currency)
+        {
+            rate = existing.Get<decimal?>("exchangeRate");
+        }
+
+        if (rate is not > 0)
+        {
+            var voucherId = Value<Guid?>("voucher");
+            var voucher = voucherId is { } id ? await ctx.Data.GetAsync(Voucher, id) : null;
+            if (voucher?.Get<DateOnly?>("voucherDate") is not { } date)
+            {
+                return ValidationResult.Error("exchangeRate", "Kursen kan ikke slås opp fordi bilaget eller bilagsdatoen mangler. Sett kursen på linjen.");
+            }
+
+            rate = await FindRateAsync(ctx, currency, baseCurrency, date);
+            if (rate is null)
+            {
+                return ValidationResult.Error(
+                    "exchangeRate", $"Fant ingen kurs for {currency} til {baseCurrency} på {date:yyyy-MM-dd} eller tidligere. Legg inn kursen, eller sett den på linjen.");
+            }
+        }
+
+        var converted = Math.Round(amount.Value * rate.Value, 2, MidpointRounding.AwayFromZero);
+        line.Set("exchangeRate", rate.Value);
+        line.Set("debit", side == "debit" ? converted : 0m);
+        line.Set("credit", side == "credit" ? converted : 0m);
+        return ValidationResult.Ok;
+    }
+
+    /// <summary>The company's base currency, or null when the settings have not been filled in.</summary>
+    private static async Task<string?> GetBaseCurrencyAsync(Erp.Sdk.AppContext ctx) =>
+        (await ctx.Data.QueryAsync(Settings, top: 1)).FirstOrDefault()?.Get<string>("baseCurrency");
+
+    /// <summary>
+    /// The newest rate on or before the date: one unit of <paramref name="from"/> is worth that many <paramref name="to"/>.
+    /// If only the opposite pair has a rate, its inverse is used.
+    /// </summary>
+    private static async Task<decimal?> FindRateAsync(Erp.Sdk.AppContext ctx, string from, string to, DateOnly date)
+    {
+        var day = date.ToString("yyyy-MM-dd");
+        var direct = await ctx.Data.QueryAsync(
+            ExchangeRate, $"fromCurrency eq '{from}' and toCurrency eq '{to}' and rateDate le '{day}'", orderBy: "rateDate desc", top: 1);
+        if (direct.FirstOrDefault()?.Get<decimal?>("rate") is > 0 and var rate)
+        {
+            return rate;
+        }
+
+        var inverse = await ctx.Data.QueryAsync(
+            ExchangeRate, $"fromCurrency eq '{to}' and toCurrency eq '{from}' and rateDate le '{day}'", orderBy: "rateDate desc", top: 1);
+        return inverse.FirstOrDefault()?.Get<decimal?>("rate") is > 0 and var opposite
+            ? Math.Round(1m / opposite, 8, MidpointRounding.AwayFromZero)
+            : null;
     }
 
     // ------------------------------------------------------------------ settlement of open items

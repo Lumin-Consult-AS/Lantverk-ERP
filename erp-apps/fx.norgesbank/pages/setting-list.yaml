@@ -1,0 +1,6 @@
+id: fx.setting-list
+type: list
+object: fx.setting
+title: fx.settings.title
+columns:
+  - currencies

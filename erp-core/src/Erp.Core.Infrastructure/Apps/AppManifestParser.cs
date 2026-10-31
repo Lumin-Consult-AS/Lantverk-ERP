@@ -34,7 +34,8 @@ public static class AppManifestParser
         "attention",
         "workflows",
         "syncSets",
-        "commands"
+        "commands",
+        "schedules"
     };
 
     private static readonly HashSet<string> AllowedPermissions = new(StringComparer.OrdinalIgnoreCase)
@@ -338,6 +339,26 @@ public static class AppManifestParser
                     Label = GetString(item, "label") ?? string.Empty,
                     Handler = GetString(item, "handler") ?? string.Empty,
                     OnConflict = GetString(item, "onConflict") ?? CommandConflictRules.Reject
+                });
+            }
+        }
+
+        if (root.TryGetValue("schedules", out var scheduleObj) && scheduleObj is IEnumerable<object> scheduleList)
+        {
+            foreach (var item in scheduleList.OfType<IDictionary<object, object>>())
+            {
+                var at = GetString(item, "at");
+                manifest.Schedules.Add(new ScheduleDefinition
+                {
+                    Id = GetString(item, "id") ?? string.Empty,
+                    OwnerApp = manifest.Id,
+                    Label = GetString(item, "label") ?? string.Empty,
+                    CommandId = GetString(item, "command") ?? string.Empty,
+                    RawAt = at,
+                    At = at is not null && TimeOnly.TryParseExact(at, "HH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var time)
+                        ? time
+                        : null,
+                    EveryMinutes = GetInt(item, "everyMinutes")
                 });
             }
         }
@@ -673,4 +694,7 @@ public static class AppManifestParser
 
     private static string? GetString(IDictionary<object, object> map, string key)
         => map.TryGetValue(key, out var val) ? val?.ToString() : null;
+
+    private static int? GetInt(IDictionary<object, object> map, string key)
+        => map.TryGetValue(key, out var val) && int.TryParse(val?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var number) ? number : null;
 }

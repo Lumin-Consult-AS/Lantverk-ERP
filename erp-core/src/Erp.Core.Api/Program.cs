@@ -14,6 +14,7 @@ using Erp.Core.Infrastructure.Storage;
 using Erp.Core.Infrastructure.Events;
 using Erp.Core.Infrastructure.Notifications;
 using Erp.Core.Infrastructure.Security;
+using Erp.Core.Infrastructure.Scheduling;
 using Erp.Core.Infrastructure.Sync;
 using Erp.Core.Infrastructure.Workflow;
 using Microsoft.Extensions.Options;
@@ -49,6 +50,10 @@ builder.Services.Configure<SyncOptions>(builder.Configuration.GetSection(SyncOpt
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<SyncOptions>>().Value);
 builder.Services.AddScoped<SyncService>();
 builder.Services.AddHostedService<AppRetentionWorker>();
+builder.Services.Configure<ScheduleOptions>(builder.Configuration.GetSection(ScheduleOptions.SectionName));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<ScheduleOptions>>().Value);
+builder.Services.AddScoped<ScheduleService>();
+builder.Services.AddHostedService<ScheduleWorker>();
 builder.Services.AddSingleton<EventBusOptions>();
 builder.Services.AddSingleton<EventDeliveryWakeSignal>();
 builder.Services.AddScoped<EventPublisher>();
@@ -380,6 +385,7 @@ v1.MapRoleEndpoints();
 v1.MapUserEndpoints();
 v1.MapDocumentEndpoints();
 v1.MapSyncEndpoints();
+v1.MapScheduleEndpoints();
 app.MapGroup("/api/v1").MapInboundEndpoints();
 app.MapGroup("/api/v1").MapTaskResponseEndpoints();
 

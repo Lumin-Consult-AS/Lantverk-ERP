@@ -1,4 +1,6 @@
 finance:
+  settings:
+    title: Accounting settings
   accounts:
     title: Chart of accounts
   vouchers:
@@ -36,3 +38,4 @@ finance:
     dueDate: Due date
     amount: Amount
     remaining: Open amount
+    baseCurrency: Base currency
