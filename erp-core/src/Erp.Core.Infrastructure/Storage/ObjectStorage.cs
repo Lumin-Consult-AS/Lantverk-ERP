@@ -89,7 +89,7 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
                     Key = key,
                     InputStream = stream,
                     ContentType = contentType,
-                    DisablePayloadSigning = !_options.ServiceUrl!.StartsWith("https", StringComparison.OrdinalIgnoreCase)
+                    DisablePayloadSigning = _options.ServiceUrl!.StartsWith("https", StringComparison.OrdinalIgnoreCase)
                 },
                 cancellationToken);
         }
@@ -180,7 +180,8 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
 
     private static bool IsLocked(AmazonS3Exception ex) =>
         ex.StatusCode == System.Net.HttpStatusCode.Forbidden
-        || ex.ErrorCode is "AccessDenied" or "ObjectLocked";
+        || ex.ErrorCode is "AccessDenied" or "ObjectLocked"
+        || ex.Message.Contains("WORM", StringComparison.OrdinalIgnoreCase); // MinIO: "Object is WORM protected"
 
     private async Task EnsureBucketAsync(CancellationToken cancellationToken)
     {
@@ -198,7 +199,7 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
             }
 
             var buckets = await _client.ListBucketsAsync(cancellationToken);
-            if (!buckets.Buckets.Any(b => b.BucketName == _options.Bucket))
+            if (buckets.Buckets is null || !buckets.Buckets.Any(b => b.BucketName == _options.Bucket))
             {
                 await _client.PutBucketAsync(
                     new PutBucketRequest { BucketName = _options.Bucket, ObjectLockEnabledForBucket = true },

@@ -31,7 +31,7 @@ services:
       - ./docker/keycloak/realm-erp-dev.json:/opt/keycloak/data/import/realm-erp-dev.json:ro
 
   minio:
-    image: minio/minio:latest
+    image: pgsty/minio:latest
     container_name: erp-minio
     command: server /data --console-address ":9001"
     environment:
