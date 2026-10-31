@@ -121,6 +121,15 @@ internal sealed class GrpcAppDataClient(DataService.DataServiceClient client, Ca
         return FromProto(res.Record);
     }
 
+    public async Task<Record> TransitionAsync(string objectId, Guid id, string transition, CancellationToken cancellationToken = default)
+    {
+        var res = await client.TransitionAsync(
+            new DataTransitionRequest { Context = context, ObjectId = objectId, RecordId = id.ToString("D"), Transition = transition },
+            CreateAuthHeaders(context),
+            cancellationToken: cancellationToken);
+        return FromProto(res.Record);
+    }
+
     public async Task<bool> DeleteAsync(
         string objectId,
         Guid id,

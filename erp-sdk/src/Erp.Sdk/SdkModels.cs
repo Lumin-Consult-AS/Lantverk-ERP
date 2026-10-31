@@ -364,6 +364,9 @@ public interface IAppDataClient
     Task<Record> CreateAsync(string objectId, IDictionary<string, object?> fields, CancellationToken cancellationToken = default);
     Task<Record> UpdateAsync(string objectId, Guid id, long rowVersion, IDictionary<string, object?> fields, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(string objectId, Guid id, long rowVersion, CancellationToken cancellationToken = default);
+
+    /// <summary>Carries out a status transition, with its hooks, permission and flow. A refusal throws an <c>RpcException</c> (<c>InvalidArgument</c>).</summary>
+    Task<Record> TransitionAsync(string objectId, Guid id, string transition, CancellationToken cancellationToken = default);
     Task<int> DeleteWhere(string objectId, Func<RecordFilterBuilder, FilterPredicate> filter, CancellationToken cancellationToken = default);
     Task<int> DeleteWhere(string objectId, string filterExpression, CancellationToken cancellationToken = default);
 }

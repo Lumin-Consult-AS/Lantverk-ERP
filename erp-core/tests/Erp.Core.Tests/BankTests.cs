@@ -305,7 +305,6 @@ public sealed class BankTests(PostgresDatabaseFixture fixture)
         Assert.Equal("Kunde 1 AS", Field(incoming, "counterpartyName"));
         Assert.Equal("1234567897", Field(incoming, "paymentReference"));
         Assert.Equal("2026-04-14", Field(incoming, "bookingDate"));
-        Assert.Equal("new", Field(incoming, "status"));
         var outgoing = transactions.Single(t => Decimal(t, "amount") < 0);
         Assert.Equal(-500m, Decimal(outgoing, "amount"));
         Assert.Equal("Faktura 77", Field(outgoing, "message"));

@@ -31,6 +31,9 @@ public sealed class NorwayApp : AppBase
     private const string VatReturn = "norway.vatreturn";
     private const string VatReturnLine = "norway.vatreturnline";
     private const string SaftExport = "norway.saftexport";
+    private const string KidObject = "norway.kid";
+    private const string OpenItem = "finance.openitem";
+    private const string Payment = "finance.payment";
     private const string Account = "finance.account";
     private const string Voucher = "finance.voucher";
     private const string Line = "finance.voucherline";
@@ -408,6 +411,44 @@ public sealed class NorwayApp : AppBase
             ["basis"] = basis,
             ["vatAmount"] = vat
         });
+
+    // ------------------------------------------------------------------ KID
+
+    /// <summary>
+    /// A new customer item (an invoice, a positive amount on a receivable account) gets a KID as its payment reference, so the
+    /// payer's bank payment can be matched to it. The number is a gap-free series with a MOD10 check digit.
+    /// </summary>
+    [OnAfterSave(OpenItem)]
+    public async Task AfterOpenItemSaved(Record saved, Erp.Sdk.AppContext ctx)
+    {
+        // An update carries only what changed, so the item is read in full
+        var item = await ctx.Data.GetAsync(OpenItem, saved.Id);
+        if (item is null || !string.IsNullOrEmpty(item.Get<string>("paymentReference")) || item.Get<decimal>("amount") <= 0
+            || await ctx.Data.GetAsync(Account, item.Get<Guid>("account")) is not { } account
+            || account.Get<string>("controlType") != "receivable")
+        {
+            return;
+        }
+
+        var existing = (await ctx.Data.QueryAsync(KidObject, $"openItem eq '{item.Id}'", top: 1)).FirstOrDefault();
+        var row = existing ?? await ctx.Data.CreateAsync(KidObject, new Dictionary<string, object?> { ["openItem"] = item.Id });
+        var kid = row.Get<string>("kid");
+        if (string.IsNullOrEmpty(kid))
+        {
+            kid = Kid.WithMod10(row.Get<string>("number")!);
+            await ctx.Data.UpdateAsync(KidObject, row.Id, row.RowVersion, new Dictionary<string, object?> { ["kid"] = kid });
+        }
+
+        var current = (await ctx.Data.GetAsync(OpenItem, item.Id))!;
+        await ctx.Data.UpdateAsync(OpenItem, current.Id, current.RowVersion, new Dictionary<string, object?> { ["paymentReference"] = kid });
+    }
+
+    /// <summary>A payment reference on a payment must be a valid KID (2 to 25 digits with a correct check digit).</summary>
+    [OnValidate(Payment)]
+    public ValidationResult ValidatePaymentReference(Record payment, Erp.Sdk.AppContext ctx) =>
+        payment.Get<string>("paymentReference") is { Length: > 0 } reference && !Kid.IsValid(reference)
+            ? ValidationResult.Error("paymentReference", $"{reference} er ikke en gyldig KID (2–25 siffer med riktig kontrollsiffer).")
+            : ValidationResult.Ok;
 
     // ------------------------------------------------------------------ SAF-T export
 

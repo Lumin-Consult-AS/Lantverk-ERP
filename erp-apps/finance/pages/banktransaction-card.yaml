@@ -1,0 +1,31 @@
+id: finance.banktransaction-card
+type: card
+object: finance.banktransaction
+title: "{bookingDate} {counterpartyName}"
+groups:
+  - label: finance.card.general
+    fields:
+      - bookingDate
+      - amount
+      - currency
+      - counterpartyName
+      - counterpartyAccount
+      - paymentReference
+      - message
+      - status
+  - label: finance.card.reconciliation
+    fields:
+      - suggestedOpenItem
+      - note
+      - openItem
+      - voucher
+      - settlement
+actions:
+  - id: accept
+    label: finance.actions.accept
+    transition: accept
+    placement: primary
+  - id: ignore
+    label: finance.actions.ignore
+    transition: ignore
+    placement: secondary
