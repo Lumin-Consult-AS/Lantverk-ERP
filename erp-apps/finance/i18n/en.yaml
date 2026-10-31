@@ -1,0 +1,38 @@
+finance:
+  accounts:
+    title: Chart of accounts
+  vouchers:
+    title: Vouchers (drafts)
+  entries:
+    title: Posted entries
+  postings:
+    title: Postings
+  openitems:
+    title: Sub-ledger – open items
+  card:
+    general: General
+    lines: Lines
+    postings: Postings
+  actions:
+    post: Post
+  fields:
+    number: Account number
+    name: Name
+    accountType: Account type
+    controlType: Sub-ledger
+    isActive: Active
+    voucherDate: Voucher date
+    description: Text
+    status: Status
+    entryNumber: Entry number
+    entryDate: Posting date
+    fiscalPeriod: Period
+    postingDate: Date
+    entry: Entry
+    account: Account
+    debit: Debit
+    credit: Credit
+    party: Party
+    dueDate: Due date
+    amount: Amount
+    remaining: Open amount

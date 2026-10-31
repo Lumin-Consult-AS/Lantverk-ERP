@@ -1,0 +1,9 @@
+id: finance.journalentry-list
+type: list
+object: finance.journalentry
+title: finance.entries.title
+columns:
+  - entryNumber
+  - entryDate
+  - description
+  - fiscalPeriod

@@ -1,0 +1,28 @@
+id: finance.voucher-card
+type: card
+object: finance.voucher
+title: "{voucherDate} – {description}"
+groups:
+  - label: finance.card.general
+    fields:
+      - voucherDate
+      - description
+      - status
+actions:
+  - id: post
+    label: finance.actions.post
+    transition: post
+    placement: primary
+tabs:
+  - label: finance.card.lines
+    list:
+      object: finance.voucherline
+      filter:
+        voucher: "{id}"
+      fields:
+        - account
+        - description
+        - debit
+        - credit
+        - party
+        - dueDate

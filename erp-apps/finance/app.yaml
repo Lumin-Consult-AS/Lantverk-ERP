@@ -1,0 +1,427 @@
+id: finance
+version: 1.0.0
+name: Regnskap
+publisher: Laftverk
+license: proprietary
+sdk: ">=1.0.0 <2.0.0"
+
+dependencies:
+  core.parties: ">=1.0.0 <2.0.0"
+  core.dimensions: ">=1.0.0 <2.0.0"
+  core.organization: ">=1.0.0 <2.0.0"
+
+runtime:
+  image: ghcr.io/laftverk/finance:1.0.0
+  resources:
+    cpu: 250m
+    memory: 256Mi
+
+enums:
+  finance.accounttype: [asset, liability, equity, revenue, expense]
+  finance.controltype: [none, receivable, payable]
+  finance.voucherstatus: [draft, posted]
+  finance.openitemstatus: [open, settled]
+  finance.settlementstatus: [draft, completed]
+
+# Landsuavhengig hovedbok. Alt norsk (kontoplan, MVA, SAF-T) ligger i Norge-pakken.
+objects:
+  finance.account:
+    label: Konto
+    fields:
+      number:
+        type: string
+        required: true
+        maxLength: 10
+        label: Kontonummer
+      name:
+        type: string
+        required: true
+        maxLength: 200
+        label: Navn
+      accountType:
+        type: enum
+        of: finance.accounttype
+        required: true
+        label: Kontotype
+      controlType:
+        type: enum
+        of: finance.controltype
+        required: true
+        default: none
+        label: Reskontro
+      isActive:
+        type: boolean
+        required: true
+        default: true
+        label: Aktiv
+    keys:
+      - name: uk_account_number
+        fields: [number]
+        scopeToCompany: true
+
+  # Kladd. Et bilag bokføres ved overgangen «post»; da kontrollerer appen balanse, periode og kontoer, og lager
+  # det bokførte bilaget (finance.journalentry) med posteringer (finance.posting) i samme transaksjon.
+  finance.voucher:
+    label: Bilag
+    fields:
+      voucherDate:
+        type: date
+        required: true
+        label: Bilagsdato
+      description:
+        type: string
+        maxLength: 500
+        label: Tekst
+      reverses:
+        type: uuid
+        label: Motposterer bokført bilag
+      status:
+        type: enum
+        of: finance.voucherstatus
+        required: true
+        default: draft
+        label: Status
+    status:
+      field: status
+      initial: draft
+      immutableIn: [posted]
+      transitions:
+        post:
+          from: draft
+          to: posted
+          permission: post
+
+  finance.voucherline:
+    label: Bilagslinje
+    fields:
+      voucher:
+        type: reference
+        to: finance.voucher
+        required: true
+        onDelete: cascade
+        label: Bilag
+      account:
+        type: reference
+        to: finance.account
+        required: true
+        label: Konto
+      description:
+        type: string
+        maxLength: 500
+        label: Tekst
+      debit:
+        type: decimal
+        required: true
+        scale: 2
+        default: 0
+        minValue: 0
+        label: Debet
+      credit:
+        type: decimal
+        required: true
+        scale: 2
+        default: 0
+        minValue: 0
+        label: Kredit
+      party:
+        type: reference
+        to: core.party
+        label: Part
+      dueDate:
+        type: date
+        label: Forfallsdato
+      dimension1:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 1
+      dimension2:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 2
+      dimension3:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 3
+      currency:
+        type: string
+        maxLength: 3
+        pattern: "^[A-Z]{3}$"
+        label: Valuta
+      currencyAmount:
+        type: decimal
+        scale: 2
+        minValue: 0
+        label: Beløp i valuta
+      exchangeRate:
+        type: decimal
+        scale: 8
+        minValue: 0
+        label: Kurs
+      status:
+        type: enum
+        of: finance.voucherstatus
+        required: true
+        default: draft
+        label: Status
+    status:
+      field: status
+      initial: draft
+      immutableIn: [posted]
+
+  # Det bokførte bilaget. Uforanderlig; korreksjon skjer med et motpostert bilag.
+  finance.journalentry:
+    label: Bokført bilag
+    fields:
+      entryNumber:
+        type: string
+        maxLength: 40
+        numberSeries:
+          padding: 6
+          perYear: true
+        label: Bilagsnummer
+      voucher:
+        type: reference
+        to: finance.voucher
+        required: true
+        label: Kladd
+      entryDate:
+        type: date
+        required: true
+        label: Bokføringsdato
+      description:
+        type: string
+        maxLength: 500
+        label: Tekst
+      fiscalPeriod:
+        type: reference
+        to: core.fiscalperiod
+        required: true
+        label: Periode
+      reversalOf:
+        type: uuid
+        label: Motposterer bilag
+      status:
+        type: enum
+        of: finance.voucherstatus
+        required: true
+        default: posted
+        label: Status
+    status:
+      field: status
+      initial: posted
+      immutableIn: [posted]
+    keys:
+      - name: uk_entry_voucher
+        fields: [voucher]
+        scopeToCompany: true
+      - name: uk_entry_reversal
+        fields: [reversalOf]
+        scopeToCompany: true
+
+  finance.posting:
+    label: Postering
+    fields:
+      entry:
+        type: reference
+        to: finance.journalentry
+        required: true
+        label: Bilag
+      postingDate:
+        type: date
+        required: true
+        label: Dato
+      account:
+        type: reference
+        to: finance.account
+        required: true
+        label: Konto
+      description:
+        type: string
+        maxLength: 500
+        label: Tekst
+      debit:
+        type: decimal
+        required: true
+        scale: 2
+        default: 0
+        label: Debet
+      credit:
+        type: decimal
+        required: true
+        scale: 2
+        default: 0
+        label: Kredit
+      party:
+        type: reference
+        to: core.party
+        label: Part
+      dimension1:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 1
+      dimension2:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 2
+      dimension3:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 3
+      currency:
+        type: string
+        maxLength: 3
+        label: Valuta
+      currencyAmount:
+        type: decimal
+        scale: 2
+        label: Beløp i valuta
+      exchangeRate:
+        type: decimal
+        scale: 8
+        label: Kurs
+      fiscalPeriod:
+        type: reference
+        to: core.fiscalperiod
+        required: true
+        label: Periode
+      status:
+        type: enum
+        of: finance.voucherstatus
+        required: true
+        default: posted
+        label: Status
+    status:
+      field: status
+      initial: posted
+      immutableIn: [posted]
+
+  # Reskontro: åpne poster per part. Opprettes ved bokføring av linjer på reskontrokontoer og reduseres av utligninger.
+  finance.openitem:
+    label: Åpen post
+    fields:
+      posting:
+        type: reference
+        to: finance.posting
+        required: true
+        label: Postering
+      party:
+        type: reference
+        to: core.party
+        required: true
+        label: Part
+      account:
+        type: reference
+        to: finance.account
+        required: true
+        label: Konto
+      dueDate:
+        type: date
+        required: true
+        label: Forfallsdato
+      amount:
+        type: decimal
+        required: true
+        scale: 2
+        label: Beløp
+      remaining:
+        type: decimal
+        required: true
+        scale: 2
+        label: Åpent beløp
+      status:
+        type: enum
+        of: finance.openitemstatus
+        required: true
+        default: open
+        label: Status
+    keys:
+      - name: uk_openitem_posting
+        fields: [posting]
+        scopeToCompany: true
+
+  finance.settlement:
+    label: Utligning
+    fields:
+      settlementDate:
+        type: date
+        required: true
+        label: Dato
+      description:
+        type: string
+        maxLength: 500
+        label: Tekst
+      status:
+        type: enum
+        of: finance.settlementstatus
+        required: true
+        default: draft
+        label: Status
+    status:
+      field: status
+      initial: draft
+      immutableIn: [completed]
+      transitions:
+        complete:
+          from: draft
+          to: completed
+          permission: post
+
+  finance.settlementitem:
+    label: Utligningslinje
+    fields:
+      settlement:
+        type: reference
+        to: finance.settlement
+        required: true
+        onDelete: cascade
+        label: Utligning
+      openItem:
+        type: reference
+        to: finance.openitem
+        required: true
+        label: Åpen post
+      amount:
+        type: decimal
+        required: true
+        scale: 2
+        label: Utlignet beløp
+
+events:
+  publishes:
+    - finance.journal.posted@1
+    - finance.settlement.completed@1
+  subscribes:
+    - core.fiscalyear.created@1: OnFiscalYearCreated
+
+pages:
+  - pages/account-list.yaml
+  - pages/voucher-list.yaml
+  - pages/voucher-card.yaml
+  - pages/journalentry-list.yaml
+  - pages/journalentry-card.yaml
+  - pages/posting-list.yaml
+  - pages/openitem-list.yaml
+
+permissionSets:
+  - id: finance.reader
+    label: Regnskap – lesetilgang
+    grants:
+      finance.account: [read]
+      finance.voucher: [read]
+      finance.voucherline: [read]
+      finance.journalentry: [read]
+      finance.posting: [read]
+      finance.openitem: [read]
+      finance.settlement: [read]
+      finance.settlementitem: [read]
+  - id: finance.bookkeeper
+    label: Regnskap – bokføring
+    grants:
+      finance.account: [read, create, update]
+      finance.voucher: [read, create, update, delete, post]
+      finance.voucherline: [read, create, update, delete]
+      finance.journalentry: [read, create]
+      finance.posting: [read, create]
+      finance.openitem: [read, create, update]
+      finance.settlement: [read, create, update, delete, post]
+      finance.settlementitem: [read, create, update, delete]

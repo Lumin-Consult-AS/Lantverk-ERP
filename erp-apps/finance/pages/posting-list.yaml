@@ -1,0 +1,12 @@
+id: finance.posting-list
+type: list
+object: finance.posting
+title: finance.postings.title
+columns:
+  - postingDate
+  - entry
+  - account
+  - description
+  - debit
+  - credit
+  - party
