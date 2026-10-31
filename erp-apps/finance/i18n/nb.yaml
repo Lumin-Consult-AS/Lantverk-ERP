@@ -1,4 +1,6 @@
 finance:
+  settings:
+    title: Regnskapsinnstillinger
   accounts:
     title: Kontoplan
   vouchers:
@@ -36,3 +38,4 @@ finance:
     dueDate: Forfallsdato
     amount: Beløp
     remaining: Åpent beløp
+    baseCurrency: Bokføringsvaluta

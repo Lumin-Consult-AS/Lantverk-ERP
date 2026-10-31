@@ -38,6 +38,9 @@ public sealed class AppManifest
     /// <summary>Business actions an offline client can queue; carried out by the app when the client reconnects.</summary>
     public List<CommandDefinition> Commands { get; set; } = [];
 
+    /// <summary>Commands the core runs on a timetable (daily at a time, or at an interval).</summary>
+    public List<ScheduleDefinition> Schedules { get; set; } = [];
+
     /// <summary>
     /// Localization dictionaries keyed by locale code (e.g. <c>nb</c>, <c>en</c>).
     /// </summary>

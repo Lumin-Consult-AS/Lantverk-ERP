@@ -16,7 +16,7 @@ Status: akseptert (31. oktober 2026). Skal gjennomgås av regnskapsfører (B2).
 
 ## Utsatt
 
-- Valutaomregning og urealisert valutagevinst/-tap (linjene lagrer valuta, beløp i valuta og kurs, men appen regner ikke ut).
+- Realisert og urealisert valutagevinst/-tap (omregning på bilagslinjer og kursoppslag er gjort, se ADR-0025).
 - Godkjenningsflyt på bilag (flytmotoren kan kobles til overgangen `post`, og gjøres i fakturatolk-steget).
 - Avskrivninger, periodisering, budsjett, konsolidering.
 - Rapportsider med eksport (saldobalanse som eget skjermbilde).

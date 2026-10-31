@@ -234,6 +234,38 @@ public static class AppManifestValidator
             }
         }
 
+        // 3d. Validate schedules: a declared command on a timetable
+        foreach (var schedule in manifest.Schedules)
+        {
+            if (!manifest.HasValidAppPrefix(schedule.Id))
+            {
+                errors.Add($"Schedule '{schedule.Id}' does not match owning app '{manifest.Id}' prefix.");
+            }
+
+            if (!manifest.Commands.Any(c => string.Equals(c.Id, schedule.CommandId, StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add($"Schedule '{schedule.Id}' runs command '{schedule.CommandId}', which this app does not declare.");
+            }
+
+            if (schedule.RawAt is not null && schedule.At is null)
+            {
+                errors.Add($"Schedule '{schedule.Id}' has an invalid 'at' time (use HH:mm, UTC).");
+            }
+            else if ((schedule.At is null) == (schedule.EveryMinutes is null))
+            {
+                errors.Add($"Schedule '{schedule.Id}' must have exactly one of 'at' (HH:mm, UTC) and 'everyMinutes'.");
+            }
+            else if (schedule.EveryMinutes is < 5)
+            {
+                errors.Add($"Schedule '{schedule.Id}' has 'everyMinutes' below the minimum of 5.");
+            }
+
+            if (manifest.IsDeclarative)
+            {
+                errors.Add($"App '{manifest.Id}' is purely declarative (no 'runtime' section) and cannot declare schedules.");
+            }
+        }
+
         // 4. Validate subscribed events (must exist in tenant or built-in core events)
         var selfPublishedEvents = manifest.Metadata.Events
             .Select(e => e.Id)

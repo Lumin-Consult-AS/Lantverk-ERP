@@ -58,7 +58,7 @@ public sealed class FinanceTests(PostgresDatabaseFixture fixture)
                 await Client.PostAsync($"/api/v1/apps/archives/{archive.GetProperty("id").GetGuid()}/purge", null);
             }
 
-            foreach (var app in new[] { "core.organization", "core.dimensions", "core.parties" })
+            foreach (var app in new[] { "core.currencies", "core.organization", "core.dimensions", "core.parties" })
             {
                 await Client.DeleteAsync($"/api/v1/apps/{app}?purge=true");
             }
@@ -293,6 +293,113 @@ public sealed class FinanceTests(PostgresDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task ForeignCurrencyLines_AreConvertedAtTheRateOnTheVoucherDate_AndCheckedWhenPosting()
+    {
+        await using var env = await SetUpAsync();
+        var c = env.Client;
+        var chart = await CreateChartAsync(c);
+
+        // Without a base currency the app does not know what to convert to
+        var early = await CreateVoucherAsync(c, "2026-03-15", "Før innstilling");
+        await ExpectLineRefusedAsync(c, early, chart.Bank, "Regnskapsinnstillinger",
+            new Dictionary<string, object?> { ["currency"] = "EUR", ["currencyAmount"] = 100m, ["currencySide"] = "debit" });
+
+        await CreateAsync(c, "finance.settings", new { baseCurrency = "NOK" });
+        using (var second = await c.PostAsJsonAsync(Url("finance.settings"), new { baseCurrency = "SEK" }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode); // one settings record per company
+        }
+
+        await CreateAsync(c, "core.exchangerate", new { fromCurrency = "EUR", toCurrency = "NOK", rateDate = "2026-03-01", rate = 11.5m });
+        await CreateAsync(c, "core.exchangerate", new { fromCurrency = "EUR", toCurrency = "NOK", rateDate = "2026-03-10", rate = 11.7m });
+        await CreateAsync(c, "core.exchangerate", new { fromCurrency = "NOK", toCurrency = "DKK", rateDate = "2026-03-01", rate = 0.65m });
+
+        // The rate of the voucher date (the 10th, not the 1st), and the base amount is worked out by the app
+        var voucher = await CreateVoucherAsync(c, "2026-03-15", "Faktura i euro");
+        var euro = await AddForeignLineAsync(c, voucher, chart.Bank, "EUR", 100m, "debit");
+        Assert.Equal(1170.00m, Decimal(euro, "debit"));
+        Assert.Equal(0m, Decimal(euro, "credit"));
+        Assert.Equal(11.7m, Decimal(euro, "exchangeRate"));
+        await AddLineAsync(c, voucher, chart.Sales, credit: 1170.00m);
+
+        // The earlier date gets the earlier rate
+        var older = await CreateVoucherAsync(c, "2026-03-05", "Tidligere dato");
+        Assert.Equal(1150.00m, Decimal(await AddForeignLineAsync(c, older, chart.Bank, "EUR", 100m, "debit"), "debit"));
+
+        // A rate set by hand on the line is used as it is
+        var manual = await CreateVoucherAsync(c, "2026-03-15", "Egen kurs");
+        var byHand = await CreateAsync(c, "finance.voucherline", new Dictionary<string, object?>
+        {
+            ["voucher"] = Id(manual), ["account"] = Id(chart.Bank), ["currency"] = "EUR", ["currencyAmount"] = 100m,
+            ["currencySide"] = "credit", ["exchangeRate"] = 12m
+        });
+        Assert.Equal(1200.00m, Decimal(byHand, "credit"));
+
+        // Only the opposite pair has a rate: its inverse is used (65 DKK at 1/0.65 = 100.00 NOK)
+        var inverse = await CreateVoucherAsync(c, "2026-03-15", "Omvendt kurs");
+        var dkk = await AddForeignLineAsync(c, inverse, chart.Bank, "DKK", 65m, "debit");
+        Assert.Equal(100.00m, Decimal(dkk, "debit"));
+
+        // No rate at all: refused with a message, and a currency equal to the base currency is an ordinary line
+        await ExpectLineRefusedAsync(c, voucher, chart.Bank, "Fant ingen kurs for USD",
+            new Dictionary<string, object?> { ["currency"] = "USD", ["currencyAmount"] = 50m, ["currencySide"] = "debit" });
+        await ExpectLineRefusedAsync(c, voucher, chart.Bank, "beløp i valuta",
+            new Dictionary<string, object?> { ["currency"] = "EUR" });
+        var plain = await CreateAsync(c, "finance.voucherline", new Dictionary<string, object?>
+        {
+            ["voucher"] = Id(voucher), ["account"] = Id(chart.Bank), ["currency"] = "NOK", ["currencyAmount"] = 5m, ["currencySide"] = "debit", ["debit"] = 5m
+        });
+        Assert.Equal(5m, Decimal(plain, "debit"));
+        Assert.Null(Field(plain, "currency"));
+        using (var removeRequest = new HttpRequestMessage(HttpMethod.Delete, $"{Url("finance.voucherline")}/{Id(plain)}"))
+        {
+            removeRequest.Headers.IfMatch.Add(new EntityTagHeaderValue($"\"{plain.GetProperty("rowVersion").GetInt64()}\""));
+            using var remove = await c.SendAsync(removeRequest);
+            Assert.True(remove.IsSuccessStatusCode, await remove.Content.ReadAsStringAsync());
+        }
+
+        // Changing the foreign amount of a draft line recalculates it with the rate kept on the line
+        using (var change = await PatchAsync(c, "finance.voucherline", euro, new { currencyAmount = 200m }))
+        {
+            Assert.Equal(HttpStatusCode.OK, change.StatusCode);
+            euro = JsonDocument.Parse(await change.Content.ReadAsStringAsync()).RootElement.Clone();
+        }
+
+        Assert.Equal(2340.00m, Decimal(euro, "debit"));
+        using (var fix = await PatchAsync(c, "finance.voucherline", (await QueryAsync(c, "finance.voucherline", $"voucher eq '{Id(voucher)}' and credit gt 0"))[0], new { credit = 2340.00m }))
+        {
+            Assert.Equal(HttpStatusCode.OK, fix.StatusCode);
+        }
+
+        // A line whose base amount no longer follows the rate (changed by hand) is refused when posting
+        using (var tamper = await PatchAsync(c, "finance.voucherline", euro, new { debit = 2000m }))
+        {
+            Assert.Equal(HttpStatusCode.OK, tamper.StatusCode);
+            euro = JsonDocument.Parse(await tamper.Content.ReadAsStringAsync()).RootElement.Clone();
+        }
+
+        using (var refused = await c.PostAsync($"{Url("finance.voucher")}/{Id(voucher)}/transitions/post", null))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Contains("stemmer ikke med kursen", await refused.Content.ReadAsStringAsync());
+        }
+
+        // Back to the rate: the voucher balances (200 EUR = 2340.00) and is posted with the foreign amount and rate on the posting
+        using (var back = await PatchAsync(c, "finance.voucherline", euro, new { currencyAmount = 200m }))
+        {
+            Assert.Equal(HttpStatusCode.OK, back.StatusCode);
+        }
+
+        var posted = await TransitionAsync(c, "finance.voucher", voucher, "post");
+        Assert.Equal("posted", Field(posted, "status"));
+        var entry = (await QueryAsync(c, "finance.journalentry", $"voucher eq '{Id(voucher)}'")).Single();
+        var bankPosting = (await QueryAsync(c, "finance.posting", $"entry eq '{Id(entry)}' and currency eq 'EUR'")).Single();
+        Assert.Equal(200m, Decimal(bankPosting, "currencyAmount"));
+        Assert.Equal(11.7m, Decimal(bankPosting, "exchangeRate"));
+        Assert.Equal(2340.00m, Decimal(bankPosting, "debit"));
+    }
+
+    [Fact]
     public async Task ANewFiscalYear_GetsOnePeriodPerMonth()
     {
         await using var env = await SetUpAsync(withYear: false);
@@ -330,7 +437,7 @@ public sealed class FinanceTests(PostgresDatabaseFixture fixture)
         }
 
         var env = new Env(factory, host, client, fixture.MigrationConnectionString);
-        foreach (var app in new[] { "core.parties", "core.dimensions", "core.organization", "finance" })
+        foreach (var app in new[] { "core.parties", "core.dimensions", "core.organization", "core.currencies", "finance" })
         {
             using var res = await client.PostAsync($"/api/v1/apps/install-builtin/{app}", null);
             Assert.True(res.IsSuccessStatusCode, $"{app}: {await res.Content.ReadAsStringAsync()}");
@@ -382,6 +489,27 @@ public sealed class FinanceTests(PostgresDatabaseFixture fixture)
             ["party"] = party,
             ["dueDate"] = dueDate
         });
+
+    private static Task<JsonElement> AddForeignLineAsync(
+        HttpClient c, JsonElement voucher, JsonElement account, string currency, decimal amount, string side) =>
+        CreateAsync(c, "finance.voucherline", new Dictionary<string, object?>
+        {
+            ["voucher"] = Id(voucher),
+            ["account"] = Id(account),
+            ["currency"] = currency,
+            ["currencyAmount"] = amount,
+            ["currencySide"] = side
+        });
+
+    private static async Task ExpectLineRefusedAsync(
+        HttpClient c, JsonElement voucher, JsonElement account, string expectedMessage, Dictionary<string, object?> fields)
+    {
+        fields["voucher"] = Id(voucher);
+        fields["account"] = Id(account);
+        using var res = await c.PostAsJsonAsync(Url("finance.voucherline"), fields);
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        Assert.Contains(expectedMessage, await res.Content.ReadAsStringAsync());
+    }
 
     private static async Task<JsonElement> PostSimpleAsync(HttpClient c, Chart chart, string date)
     {

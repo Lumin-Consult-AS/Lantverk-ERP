@@ -1,0 +1,6 @@
+id: finance.settings-list
+type: list
+object: finance.settings
+title: finance.settings.title
+columns:
+  - baseCurrency

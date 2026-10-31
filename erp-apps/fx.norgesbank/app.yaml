@@ -1,0 +1,59 @@
+id: fx.norgesbank
+version: 1.0.0
+name: Valutakurser fra Norges Bank
+publisher: Laftverk
+license: proprietary
+sdk: ">=1.0.0 <2.0.0"
+
+dependencies:
+  core.currencies: ">=1.0.0 <2.0.0"
+
+# Henter kursene fra Norges Banks åpne API og lagrer dem som core.exchangerate. Appen når bare dette ene eksterne stedet.
+runtime:
+  image: ghcr.io/laftverk/fx-norgesbank:1.0.0
+  resources:
+    cpu: 100m
+    memory: 128Mi
+  egress:
+    - data.norges-bank.no:443
+
+objects:
+  fx.setting:
+    label: Kursoppdatering
+    fields:
+      singleton:
+        type: string
+        required: true
+        maxLength: 20
+        default: settings
+        label: Nøkkel
+      currencies:
+        type: string
+        required: true
+        maxLength: 200
+        label: Valutaer (kommaseparert, ISO-koder)
+    keys:
+      - name: uk_fx_setting_company
+        fields: [singleton]
+        scopeToCompany: true
+
+commands:
+  - id: fx.norgesbank.update
+    label: Hent kurser fra Norges Bank
+    handler: Update
+
+# Norges Bank publiserer rundt kl. 16 norsk tid på bankdager. 15:30 UTC er etter det både vinter og sommer.
+schedules:
+  - id: fx.norgesbank.daily
+    label: Daglig kursoppdatering
+    command: fx.norgesbank.update
+    at: "15:30"
+
+pages:
+  - pages/setting-list.yaml
+
+permissionSets:
+  - id: fx.manager
+    label: Kursoppdatering – innstillinger
+    grants:
+      fx.setting: [read, create, update]
