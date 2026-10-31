@@ -30,3 +30,6 @@ coverage/
 .DS_Store
 Thumbs.db
 
+
+# Local editor state (Obsidian)
+.obsidian/
