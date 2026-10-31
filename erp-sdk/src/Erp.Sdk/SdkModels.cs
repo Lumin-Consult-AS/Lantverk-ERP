@@ -65,6 +65,61 @@ public sealed class OnEventAttribute(string eventSpec) : Attribute
 }
 
 /// <summary>
+/// Marks the handler of a command declared in the manifest (<c>commands: - id: demo.contacts.setpriority</c>). Commands are
+/// business actions a client queued while offline. The method takes <see cref="CommandContext"/>, <see cref="AppContext"/>
+/// and a <see cref="CancellationToken"/> (all optional) and returns <c>Task&lt;CommandResult&gt;</c>. It works through the
+/// data API, so hooks, validation and permissions apply exactly as for an online user; a rejection by one of them becomes
+/// <see cref="CommandResult.Rejected"/> automatically.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class CommandAttribute(string id) : Attribute
+{
+    public string Id { get; } = id;
+}
+
+/// <summary>A record a command touches: the version the client saw when it went offline and the version now.</summary>
+public sealed record CommandTarget(string ObjectId, Guid RecordId, long BaseRowVersion, long CurrentRowVersion, bool Exists)
+{
+    /// <summary>The record changed (or was deleted) since the client saw it.</summary>
+    public bool IsStale => !Exists || CurrentRowVersion != BaseRowVersion;
+}
+
+public sealed class CommandContext
+{
+    public required string CommandId { get; init; }
+    public required Guid RunId { get; init; }
+    public required string DeviceId { get; init; }
+    public required System.Text.Json.JsonElement Args { get; init; }
+    public required IReadOnlyList<CommandTarget> Targets { get; init; }
+
+    /// <summary>A target is stale and the manifest rule is <c>adjust</c>: the handler decides how to adjust.</summary>
+    public bool HasConflict { get; init; }
+
+    /// <summary>A person chose to apply this command from the manual queue despite the conflict.</summary>
+    public bool Forced { get; init; }
+
+    public T? Arg<T>(string name) =>
+        Args.ValueKind == System.Text.Json.JsonValueKind.Object
+        && Args.TryGetProperty(name, out var value)
+        && value.ValueKind != System.Text.Json.JsonValueKind.Null
+            ? value.Deserialize<T>()
+            : default;
+}
+
+/// <summary>The outcome of a command: carried out, carried out in an adjusted form, or not carried out.</summary>
+public sealed record CommandResult(string Outcome, string? Message = null, string? ResultJson = null)
+{
+    public static CommandResult Applied(string? message = null, object? result = null) =>
+        new("applied", message, result is null ? null : System.Text.Json.JsonSerializer.Serialize(result));
+
+    /// <summary>Carried out, but not exactly as asked because the data changed meanwhile (e.g. a deviation was recorded).</summary>
+    public static CommandResult Adjusted(string message, object? result = null) =>
+        new("adjusted", message, result is null ? null : System.Text.Json.JsonSerializer.Serialize(result));
+
+    public static CommandResult Rejected(string message) => new("rejected", message);
+}
+
+/// <summary>
 /// Marks a data migration declared in the manifest (<c>migrations: - run: Migrations.V110</c>). The method takes
 /// <see cref="AppContext"/>, <see cref="MigrationState"/> and a <see cref="CancellationToken"/> (all optional) and
 /// returns <c>Task&lt;MigrationStep&gt;</c>. It works through the tenant's data in batches through the data API and must

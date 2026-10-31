@@ -29,6 +29,8 @@ service AppService {
   rpc DeliverEvent (EventDeliveryRequest) returns (EventDeliveryResponse);
   rpc InvokeInterface (InterfaceCallRequest) returns (InterfaceCallResponse);
   rpc RunMigration (MigrationRunRequest) returns (MigrationRunResponse);
+  // A business command queued by an offline client (e.g. ConfirmPick), carried out through the data API.
+  rpc RunCommand (CommandRequest) returns (CommandResponse);
 }
 
 message HealthCheckRequest {
@@ -85,6 +87,37 @@ message InterfaceCallRequest {
 
 message InterfaceCallResponse {
   string output_json = 1;
+}
+
+// One record a command touches, with the version the offline client saw and the version the core sees now.
+message CommandTargetProto {
+  string object_id = 1;
+  string record_id = 2;
+  int64 base_row_version = 3;
+  int64 current_row_version = 4;
+  bool exists = 5;
+}
+
+message CommandRequest {
+  CallContextProto context = 1;
+  // The command as declared in the manifest (commands: - id: ...).
+  string command_id = 2;
+  // The client-generated id of this queued command (idempotency key).
+  string run_id = 3;
+  string device_id = 4;
+  string args_json = 5;
+  repeated CommandTargetProto targets = 6;
+  // True when a target changed since the client saw it and the manifest rule is "adjust": the handler decides how.
+  bool conflict = 7;
+  // True when a person chose to apply a command that was waiting in the manual queue, despite a conflict.
+  bool forced = 8;
+}
+
+message CommandResponse {
+  // applied | adjusted | rejected
+  string outcome = 1;
+  string message = 2;
+  string result_json = 3;
 }
 
 // A migration runs in steps. The core calls RunMigration repeatedly, passing back the checkpoint of the previous

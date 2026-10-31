@@ -42,6 +42,23 @@ public sealed class AppRetentionWorker(
         }
     }
 
+    /// <summary>Entries older than the configured retention are removed from the delta-sync change log.</summary>
+    private async Task PurgeChangeLogAsync(CancellationToken cancellationToken)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var retention = scope.ServiceProvider.GetRequiredService<Erp.Core.Infrastructure.Sync.SyncOptions>().ChangeLogRetention;
+        var connection = await TenantDb.OpenAsync(dbContext, tenantContext, cancellationToken);
+        await using var cmd = TenantDb.Create(connection, null, "SELECT core.purge_change_log(@older);");
+        TenantDb.Add(cmd, "older", NpgsqlTypes.NpgsqlDbType.Interval, retention);
+        var purged = Convert.ToInt64(await cmd.ExecuteScalarAsync(cancellationToken));
+        if (purged > 0)
+        {
+            logger.LogInformation("Purged {Count} change-log entries older than {Retention}.", purged, retention);
+        }
+    }
+
     /// <summary>Purges what is due in every tenant. Returns the combined result.</summary>
     public async Task<RetentionSweepResult> RunOnceAsync(CancellationToken cancellationToken)
     {
@@ -58,6 +75,8 @@ public sealed class AppRetentionWorker(
                 tenants.Add(reader.GetGuid(0));
             }
         }
+
+        await PurgeChangeLogAsync(cancellationToken);
 
         int archives = 0, dropped = 0, cleared = 0;
         foreach (var tenantId in tenants)

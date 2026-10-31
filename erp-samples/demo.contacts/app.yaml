@@ -55,6 +55,29 @@ events:
   subscribes:
     - core.party.deleted@1: OnPartyDeleted
 
+# What a handheld downloads for offline use: the notes and the parties they belong to.
+syncSets:
+  - id: demo.contacts.notes
+    label: Kontaktnotater og parter
+    objects:
+      - object: demo.contactnote
+      - object: core.party
+
+# Actions the offline client queues; the app carries them out through the data API when the client reconnects.
+commands:
+  - id: demo.contacts.setpriority
+    label: Sett prioritet
+    handler: SetPriority
+    onConflict: adjust
+  - id: demo.contacts.setfollowup
+    label: Sett oppfølgingsdato
+    handler: SetFollowUp
+    onConflict: reject
+  - id: demo.contacts.deletenote
+    label: Slett notat
+    handler: DeleteNote
+    onConflict: manual
+
 pages:
   - pages/contactnote-list.yaml
   - pages/contactnote-card.yaml

@@ -196,6 +196,12 @@ public static class MetadataDdlGenerator
             CREATE TRIGGER "trg_{table}_audit_immutable"
                 BEFORE UPDATE OR DELETE OR TRUNCATE ON "{schema}"."{auditTable}"
                 FOR EACH STATEMENT EXECUTE FUNCTION core.prevent_audit_modification();
+
+            -- Every change is also logged for delta sync (the cursor of offline clients, ADR-0014).
+            DROP TRIGGER IF EXISTS "trg_{table}_changelog" ON "{schema}"."{table}";
+            CREATE TRIGGER "trg_{table}_changelog"
+                AFTER INSERT OR UPDATE OR DELETE ON "{schema}"."{table}"
+                FOR EACH ROW EXECUTE FUNCTION core.capture_change_log();
             """);
 
         return new MetadataDdlPlan(transactional, concurrentIndexes);

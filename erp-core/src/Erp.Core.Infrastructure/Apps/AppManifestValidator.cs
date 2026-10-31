@@ -176,6 +176,64 @@ public static class AppManifestValidator
             }
         }
 
+        // 3c. Validate offline sync sets and commands (ADR-0014)
+        foreach (var set in manifest.SyncSets)
+        {
+            if (!manifest.HasValidAppPrefix(set.Id))
+            {
+                errors.Add($"Sync set '{set.Id}' does not match owning app '{manifest.Id}' prefix.");
+            }
+
+            if (set.Objects.Count == 0)
+            {
+                errors.Add($"Sync set '{set.Id}' must list at least one object.");
+            }
+
+            foreach (var entry in set.Objects)
+            {
+                if (!existingObjects.ContainsKey(entry.Object) && !manifestObjectsById.ContainsKey(entry.Object))
+                {
+                    errors.Add($"Sync set '{set.Id}' refers to unknown object '{entry.Object}'.");
+                }
+
+                if (!string.IsNullOrWhiteSpace(entry.Filter))
+                {
+                    try
+                    {
+                        _ = Erp.Core.Infrastructure.Data.FilterExpressionParser.Parse(
+                            entry.Filter.Replace("{me}", "00000000-0000-0000-0000-000000000000").Replace("{today}", "2000-01-01"));
+                    }
+                    catch (Erp.Core.Domain.Data.RecordValidationException ex)
+                    {
+                        errors.Add($"Sync set '{set.Id}' has an invalid filter on '{entry.Object}': {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        foreach (var command in manifest.Commands)
+        {
+            if (!manifest.HasValidAppPrefix(command.Id))
+            {
+                errors.Add($"Command '{command.Id}' does not match owning app '{manifest.Id}' prefix.");
+            }
+
+            if (string.IsNullOrWhiteSpace(command.Handler))
+            {
+                errors.Add($"Command '{command.Id}' must name its handler.");
+            }
+
+            if (!CommandConflictRules.All.Contains(command.OnConflict, StringComparer.OrdinalIgnoreCase))
+            {
+                errors.Add($"Command '{command.Id}' has unknown conflict rule '{command.OnConflict}' (use reject, adjust or manual).");
+            }
+
+            if (manifest.IsDeclarative)
+            {
+                errors.Add($"App '{manifest.Id}' is purely declarative (no 'runtime' section) and cannot declare commands.");
+            }
+        }
+
         // 4. Validate subscribed events (must exist in tenant or built-in core events)
         var selfPublishedEvents = manifest.Metadata.Events
             .Select(e => e.Id)

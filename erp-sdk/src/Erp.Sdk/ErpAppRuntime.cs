@@ -570,6 +570,80 @@ public sealed class ErpAppGrpcService<TApp>(
         };
     }
 
+    public override async Task<CommandResponse> RunCommand(CommandRequest request, ServerCallContext context)
+    {
+        var method = typeof(TApp).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .FirstOrDefault(m => m.GetCustomAttributes<CommandAttribute>()
+                .Any(a => string.Equals(a.Id, request.CommandId, StringComparison.OrdinalIgnoreCase)))
+            ?? throw new RpcException(new Status(
+                StatusCode.NotFound,
+                $"The app has no handler for command '{request.CommandId}'. Mark the method with [Command(\"{request.CommandId}\")]."));
+
+        var appCtx = BuildAppContext(request.Context, context);
+        var command = new CommandContext
+        {
+            CommandId = request.CommandId,
+            RunId = Guid.TryParse(request.RunId, out var runId) ? runId : Guid.Empty,
+            DeviceId = request.DeviceId,
+            Args = string.IsNullOrWhiteSpace(request.ArgsJson)
+                ? default
+                : System.Text.Json.JsonDocument.Parse(request.ArgsJson).RootElement.Clone(),
+            Targets = request.Targets
+                .Select(t => new CommandTarget(
+                    t.ObjectId, Guid.TryParse(t.RecordId, out var id) ? id : Guid.Empty, t.BaseRowVersion, t.CurrentRowVersion, t.Exists))
+                .ToList(),
+            HasConflict = request.Conflict,
+            Forced = request.Forced
+        };
+
+        var args = method.GetParameters().Select(p =>
+            p.ParameterType == typeof(CommandContext) ? (object?)command
+            : p.ParameterType == typeof(AppContext) ? appCtx
+            : p.ParameterType == typeof(CancellationToken) ? context.CancellationToken
+            : throw new RpcException(new Status(
+                StatusCode.FailedPrecondition,
+                $"Command '{request.CommandId}' has an unsupported parameter '{p.Name}' of type {p.ParameterType.Name}."))).ToArray();
+
+        CommandResult result;
+        try
+        {
+            var returned = method.Invoke(appInstance, args);
+            result = returned switch
+            {
+                Task<CommandResult> typed => await typed.WaitAsync(context.CancellationToken),
+                CommandResult direct => direct,
+                Task plain => await CompleteCommandAsync(plain, context.CancellationToken),
+                _ => CommandResult.Applied()
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var cause = ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
+
+            // The core refused one of the handler's data calls (validation hook, permission, conflict, missing record):
+            // that is the same answer an online user would get, so the command is rejected rather than failed.
+            if (cause is RpcException { StatusCode: StatusCode.InvalidArgument or StatusCode.PermissionDenied or StatusCode.Aborted or StatusCode.NotFound } rpc)
+            {
+                return new CommandResponse { Outcome = "rejected", Message = rpc.Status.Detail };
+            }
+
+            throw new RpcException(new Status(StatusCode.Internal, $"{cause.GetType().Name}: {cause.Message}"));
+        }
+
+        return new CommandResponse
+        {
+            Outcome = result.Outcome,
+            Message = result.Message ?? string.Empty,
+            ResultJson = result.ResultJson ?? string.Empty
+        };
+    }
+
+    private static async Task<CommandResult> CompleteCommandAsync(Task task, CancellationToken cancellationToken)
+    {
+        await task.WaitAsync(cancellationToken);
+        return CommandResult.Applied();
+    }
+
     /// <summary>A migration written as a plain <c>Task</c> has finished when the task has; errors propagate.</summary>
     private static async Task<MigrationStep> CompleteAsync(Task task, CancellationToken cancellationToken)
     {

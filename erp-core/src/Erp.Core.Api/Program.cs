@@ -14,6 +14,7 @@ using Erp.Core.Infrastructure.Storage;
 using Erp.Core.Infrastructure.Events;
 using Erp.Core.Infrastructure.Notifications;
 using Erp.Core.Infrastructure.Security;
+using Erp.Core.Infrastructure.Sync;
 using Erp.Core.Infrastructure.Workflow;
 using Microsoft.Extensions.Options;
 using Erp.Core.Infrastructure.Data;
@@ -44,6 +45,9 @@ builder.Services.Configure<AppLifecycleOptions>(builder.Configuration.GetSection
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<AppLifecycleOptions>>().Value);
 builder.Services.AddScoped<AppMigrationService>();
 builder.Services.AddScoped<AppRetentionService>();
+builder.Services.Configure<SyncOptions>(builder.Configuration.GetSection(SyncOptions.SectionName));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<SyncOptions>>().Value);
+builder.Services.AddScoped<SyncService>();
 builder.Services.AddHostedService<AppRetentionWorker>();
 builder.Services.AddSingleton<EventBusOptions>();
 builder.Services.AddSingleton<EventDeliveryWakeSignal>();
@@ -374,6 +378,7 @@ v1.MapEventEndpoints();
 v1.MapWorkflowEndpoints();
 v1.MapRoleEndpoints();
 v1.MapDocumentEndpoints();
+v1.MapSyncEndpoints();
 app.MapGroup("/api/v1").MapInboundEndpoints();
 app.MapGroup("/api/v1").MapTaskResponseEndpoints();
 
