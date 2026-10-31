@@ -188,6 +188,8 @@ Stegene skal tas i rekkefølge. Hvert steg har: mål, innhold, «Ferdig når» (
 
 **Ferdig når** hele porten for fase 1 (øverst i dokumentet) demonstreres i en demo-tenant, og `erp-samples` publiseres offentlig.
 
+> **Endret 31. oktober 2026 (ADR-0015):** publiseringen av `erp-samples` er utsatt til en senere port. Porten for fase 1 lukkes når den øvrige demoen er godkjent.
+
 ---
 
 ## Utsatt (skal ikke bygges i fase 1)
