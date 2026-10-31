@@ -236,6 +236,11 @@ public static class YamlMetadataParser
                 Initial = GetString(statusMap, "initial") ?? string.Empty
             };
 
+            if (statusMap.TryGetValue("immutableIn", out var immutableRaw) && immutableRaw is IEnumerable<object> immutableList)
+            {
+                statusDef.ImmutableIn.AddRange(immutableList.Select(v => v?.ToString() ?? string.Empty).Where(v => v.Length > 0));
+            }
+
             if (TryGetMap(statusMap, "transitions", out var transitionsMap))
             {
                 foreach (var kvp in transitionsMap)

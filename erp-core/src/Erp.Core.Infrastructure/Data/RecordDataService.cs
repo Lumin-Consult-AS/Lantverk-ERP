@@ -1579,12 +1579,20 @@ public sealed class RecordDataService(
                 }
                 return result;
             }
-            catch
+            catch (Exception ex)
             {
                 if (localTx is not null)
                 {
                     await localTx.RollbackAsync(cancellationToken);
                 }
+
+                // The database trigger is the guarantee; the caller gets a readable error.
+                if (ex is Npgsql.PostgresException { SqlState: "23000" } pg
+                    && pg.MessageText.StartsWith("immutable record", StringComparison.Ordinal))
+                {
+                    throw new RecordValidationException(pg.MessageText, null);
+                }
+
                 throw;
             }
             finally
