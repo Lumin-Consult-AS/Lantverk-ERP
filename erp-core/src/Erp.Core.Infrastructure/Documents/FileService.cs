@@ -26,7 +26,8 @@ public sealed class DocumentOptions
     /// <summary>Domain of generated inbox addresses, e.g. <c>innboks.example.no</c>.</summary>
     public string InboxDomain { get; set; } = "inbox.localhost";
 
-    public int? RetentionYears(string? countryCode, string category)
+    /// <summary>Country rule in configuration first, then <paramref name="appRuleYears"/> (from an installed app), then the default.</summary>
+    public int? RetentionYears(string? countryCode, string category, int? appRuleYears = null)
     {
         if (countryCode is not null
             && Retention.TryGetValue(countryCode, out var perCountry)
@@ -35,7 +36,7 @@ public sealed class DocumentOptions
             return years;
         }
 
-        return DefaultRetentionYears.TryGetValue(category, out var defaultYears) ? defaultYears : null;
+        return appRuleYears ?? (DefaultRetentionYears.TryGetValue(category, out var defaultYears) ? defaultYears : null);
     }
 }
 
@@ -301,7 +302,8 @@ public sealed class FileService(
             throw new FileUnavailableException($"File '{file.FileName}' is not available and cannot be attached.");
         }
 
-        var years = options.RetentionYears(await CountryCodeAsync(connection, file.CompanyId, cancellationToken), category);
+        var country = await CountryCodeAsync(connection, file.CompanyId, cancellationToken);
+        var years = options.RetentionYears(country, category, await AppRetentionYearsAsync(connection, country, category, cancellationToken));
         var retainUntil = years is null ? (DateTimeOffset?)null : DateTimeOffset.UtcNow.AddYears(years.Value);
 
         await using var tx = await connection.BeginTransactionAsync(cancellationToken);
@@ -513,6 +515,29 @@ public sealed class FileService(
         TenantDb.Add(cmd, "id", NpgsqlDbType.Uuid, fileId);
         return (string)(await cmd.ExecuteScalarAsync(cancellationToken)
             ?? throw new KeyNotFoundException($"File '{fileId}' was not found."));
+    }
+
+    /// <summary>The retention an installed app declares for the country and category (ADR-0026), if any; the longest wins.</summary>
+    private static async Task<int?> AppRetentionYearsAsync(DbConnection connection, string? country, string category, CancellationToken cancellationToken)
+    {
+        if (country is null)
+        {
+            return null;
+        }
+
+        await using var cmd = TenantDb.Create(
+            connection,
+            null,
+            """
+            SELECT max((r ->> 'years')::int)
+              FROM core.installed_app a,
+                   jsonb_array_elements(COALESCE(a.manifest_json -> 'retention', '[]'::jsonb)) r
+             WHERE upper(r ->> 'country') = upper(@country) AND lower(r ->> 'category') = lower(@category);
+            """);
+        TenantDb.Add(cmd, "country", NpgsqlDbType.Varchar, country);
+        TenantDb.Add(cmd, "category", NpgsqlDbType.Varchar, category);
+        var value = await cmd.ExecuteScalarAsync(cancellationToken);
+        return value is int years ? years : null;
     }
 
     /// <summary>Country of the file's company (retention rules differ per country); the tenant's default country otherwise.</summary>

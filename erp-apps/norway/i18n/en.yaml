@@ -1,0 +1,36 @@
+norway:
+  settings:
+    title: Norwegian set-up
+  vatcodes:
+    title: VAT codes
+  vatrates:
+    title: VAT rates
+  vatentries:
+    title: VAT entries
+  vatreturns:
+    title: VAT returns
+  card:
+    general: General
+    result: Result
+    lines: Basis and VAT per code
+  actions:
+    calculate: Calculate
+    reopen: Reopen
+  fields:
+    chartVersion: Installed version
+    code: Code
+    name: Name
+    direction: Direction
+    account: VAT account
+    isActive: Active
+    rate: Rate (%)
+    validFrom: Valid from
+    validTo: Valid to
+    entryDate: Date
+    vatCode: VAT code
+    basis: Basis
+    vatAmount: VAT
+    startDate: From date
+    endDate: To date
+    payable: Payable
+    status: Status

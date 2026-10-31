@@ -1,0 +1,9 @@
+id: norway.vatrate-list
+type: list
+object: norway.vatrate
+title: norway.vatrates.title
+columns:
+  - vatCode
+  - rate
+  - validFrom
+  - validTo

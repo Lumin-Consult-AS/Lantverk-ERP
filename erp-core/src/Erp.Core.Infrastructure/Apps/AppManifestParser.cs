@@ -35,7 +35,8 @@ public static class AppManifestParser
         "workflows",
         "syncSets",
         "commands",
-        "schedules"
+        "schedules",
+        "retention"
     };
 
     private static readonly HashSet<string> AllowedPermissions = new(StringComparer.OrdinalIgnoreCase)
@@ -359,6 +360,19 @@ public static class AppManifestParser
                         ? time
                         : null,
                     EveryMinutes = GetInt(item, "everyMinutes")
+                });
+            }
+        }
+
+        if (root.TryGetValue("retention", out var retentionObj) && retentionObj is IEnumerable<object> retentionList)
+        {
+            foreach (var item in retentionList.OfType<IDictionary<object, object>>())
+            {
+                manifest.Retention.Add(new RetentionRuleDefinition
+                {
+                    Country = GetString(item, "country") ?? string.Empty,
+                    Category = GetString(item, "category") ?? string.Empty,
+                    Years = GetInt(item, "years") ?? 0
                 });
             }
         }

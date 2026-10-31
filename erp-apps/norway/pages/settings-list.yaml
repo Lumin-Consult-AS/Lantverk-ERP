@@ -1,0 +1,6 @@
+id: norway.settings-list
+type: list
+object: norway.settings
+title: norway.settings.title
+columns:
+  - chartVersion

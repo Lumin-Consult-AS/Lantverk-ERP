@@ -1,0 +1,10 @@
+id: norway.vatreturn-list
+type: list
+object: norway.vatreturn
+title: norway.vatreturns.title
+columns:
+  - name
+  - startDate
+  - endDate
+  - payable
+  - status

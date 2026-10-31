@@ -266,6 +266,15 @@ public static class AppManifestValidator
             }
         }
 
+        // 3e. Validate retention rules: a country (ISO code), a category and a positive number of years
+        foreach (var rule in manifest.Retention)
+        {
+            if (rule.Country.Length != 2 || string.IsNullOrWhiteSpace(rule.Category) || rule.Years < 1)
+            {
+                errors.Add($"Retention rule for country '{rule.Country}' and category '{rule.Category}' is invalid (use a two-letter country, a category and years of 1 or more).");
+            }
+        }
+
         // 4. Validate subscribed events (must exist in tenant or built-in core events)
         var selfPublishedEvents = manifest.Metadata.Events
             .Select(e => e.Id)

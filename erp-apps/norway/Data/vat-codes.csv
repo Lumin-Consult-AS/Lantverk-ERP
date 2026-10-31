@@ -1,0 +1,13 @@
+code;name;direction;account;rate;validFrom
+1;Fradrag for inngående MVA, høy sats;input;2710;25;2022-01-01
+11;Fradrag for inngående MVA, middels sats;input;2710;15;2022-01-01
+12;Fradrag for inngående MVA, råfisk;input;2710;11.11;2022-01-01
+13;Fradrag for inngående MVA, lav sats;input;2710;12;2022-01-01
+3;Utgående MVA, høy sats;output;2700;25;2022-01-01
+31;Utgående MVA, middels sats;output;2700;15;2022-01-01
+32;Utgående MVA, råfisk;output;2700;11.11;2022-01-01
+33;Utgående MVA, lav sats;output;2700;12;2022-01-01
+5;Salg fritatt for MVA (innenfor loven);output;;0;2022-01-01
+52;Utførsel av varer og tjenester;output;;0;2022-01-01
+6;Salg utenfor MVA-loven;output;;0;2022-01-01
+7;Kjøp uten MVA-behandling;input;;0;2022-01-01

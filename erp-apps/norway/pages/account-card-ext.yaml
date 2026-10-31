@@ -1,0 +1,4 @@
+extend: finance.account-card
+fields:
+  - after: finance.account.controlType
+    field: norway.standardAccount

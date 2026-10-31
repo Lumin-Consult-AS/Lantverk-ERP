@@ -1,0 +1,35 @@
+id: norway.vatreturn-card
+type: card
+object: norway.vatreturn
+title: "{name}"
+groups:
+  - label: norway.card.general
+    fields:
+      - name
+      - startDate
+      - endDate
+      - status
+  - label: norway.card.result
+    fields:
+      - outputVat
+      - inputVat
+      - payable
+actions:
+  - id: calculate
+    label: norway.actions.calculate
+    transition: calculate
+    placement: primary
+  - id: reopen
+    label: norway.actions.reopen
+    transition: reopen
+    placement: secondary
+tabs:
+  - label: norway.card.lines
+    list:
+      object: norway.vatreturnline
+      filter:
+        vatReturn: "{id}"
+      fields:
+        - vatCode
+        - basis
+        - vatAmount

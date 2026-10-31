@@ -1,0 +1,10 @@
+id: norway.vatcode-list
+type: list
+object: norway.vatcode
+title: norway.vatcodes.title
+columns:
+  - code
+  - name
+  - direction
+  - account
+  - isActive
