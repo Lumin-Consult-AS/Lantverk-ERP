@@ -1,0 +1,9 @@
+id: core.fiscalyear-list
+type: list
+object: core.fiscalyear
+title: organization.list.title
+columns:
+  - year
+  - startDate
+  - endDate
+  - status

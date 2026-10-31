@@ -1,0 +1,9 @@
+currencies:
+  list:
+    title: Valutakurser
+  fields:
+    fromCurrency: Fra valuta
+    toCurrency: Til valuta
+    rateDate: Dato
+    rate: Kurs
+    source: Kilde

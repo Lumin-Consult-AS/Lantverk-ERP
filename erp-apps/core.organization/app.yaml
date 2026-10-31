@@ -1,0 +1,123 @@
+id: core.organization
+version: 1.0.0
+name: Organisasjon
+publisher: Laftverk
+license: proprietary
+sdk: ">=1.0.0 <2.0.0"
+
+enums:
+  core.periodstatus: [open, closed]
+
+# Regnskapsår og perioder per selskap. Appen vet ikke hva som skjer i en periode; regnskapsappen sjekker status ved bokføring.
+objects:
+  core.fiscalyear:
+    label: Regnskapsår
+    fields:
+      year:
+        type: integer
+        required: true
+        minValue: 1900
+        maxValue: 2200
+        label: År
+      startDate:
+        type: date
+        required: true
+        label: Fra dato
+      endDate:
+        type: date
+        required: true
+        label: Til dato
+      status:
+        type: enum
+        of: core.periodstatus
+        required: true
+        default: open
+        label: Status
+    status:
+      field: status
+      initial: open
+      transitions:
+        close:
+          from: open
+          to: closed
+          permission: update
+          locksRecord: true
+        reopen:
+          from: closed
+          to: open
+          permission: update
+    keys:
+      - name: uk_fiscalyear_year
+        fields: [year]
+        scopeToCompany: true
+
+  core.fiscalperiod:
+    label: Periode
+    fields:
+      fiscalYear:
+        type: reference
+        to: core.fiscalyear
+        required: true
+        onDelete: cascade
+        label: Regnskapsår
+      number:
+        type: integer
+        required: true
+        minValue: 0
+        maxValue: 14
+        label: Periodenummer
+      name:
+        type: string
+        maxLength: 50
+        label: Navn
+      startDate:
+        type: date
+        required: true
+        label: Fra dato
+      endDate:
+        type: date
+        required: true
+        label: Til dato
+      status:
+        type: enum
+        of: core.periodstatus
+        required: true
+        default: open
+        label: Status
+    status:
+      field: status
+      initial: open
+      transitions:
+        close:
+          from: open
+          to: closed
+          permission: update
+          locksRecord: true
+        reopen:
+          from: closed
+          to: open
+          permission: update
+    keys:
+      - name: uk_fiscalperiod_number
+        fields: [fiscalYear, number]
+        scopeToCompany: true
+
+events:
+  publishes:
+    - core.fiscalperiod.updated@1
+
+pages:
+  - pages/fiscalyear-list.yaml
+  - pages/fiscalyear-card.yaml
+
+permissionSets:
+  - id: core.organization.reader
+    label: Organisasjon – lesetilgang
+    grants:
+      core.fiscalyear: [read]
+      core.fiscalperiod: [read]
+  - id: core.organization.manager
+    label: Organisasjon – full tilgang
+    grants:
+      core.fiscalyear: [read, create, update, delete]
+      core.fiscalperiod: [read, create, update, delete]

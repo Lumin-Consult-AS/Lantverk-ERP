@@ -1,0 +1,16 @@
+organization:
+  list:
+    title: Fiscal years
+  card:
+    general: General
+    periods: Periods
+  actions:
+    close: Close
+    reopen: Reopen
+  fields:
+    year: Year
+    startDate: From date
+    endDate: To date
+    status: Status
+    number: Period
+    name: Name
