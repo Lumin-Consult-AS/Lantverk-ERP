@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/DEMO_FASE_1.md",
+                "file": "docs/adr/0014-frakoblet-synk.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "DEMO_FASE_1"
+              "title": "0014-frakoblet-synk"
             }
           }
         ]
@@ -99,7 +99,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "docs/DEMO_FASE_1.md",
+                "file": "docs/adr/0014-frakoblet-synk.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -118,7 +118,7 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "docs/DEMO_FASE_1.md",
+                "file": "docs/adr/0014-frakoblet-synk.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
@@ -161,7 +161,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "docs/DEMO_FASE_1.md",
+                "file": "docs/adr/0014-frakoblet-synk.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
@@ -188,8 +188,11 @@
       "bases:Create new base": false
     }
   },
-  "active": "203143e5b29523e1",
+  "active": "87492cd749f856d5",
   "lastOpenFiles": [
+    "erp-sdk/LICENSE",
+    "erp-samples/LICENSE",
+    "docs/DEMO_FASE_1.md",
     "erp-client/src/Erp.Client/bin/Debug/net10.0/wwwroot/_framework/Erp.Client.o2ig42qpfw.wasm.gz",
     "erp-client/src/Erp.Client/bin/Debug/net10.0/wwwroot/_framework/Erp.Client.tnvetiwcfn.pdb.gz",
     "erp-client/src/Erp.Client/bin/Debug/net10.0/wwwroot/_framework/Erp.Client.tnvetiwcfn.pdb",
@@ -198,7 +201,6 @@
     "erp-client/src/Erp.Client/obj/Debug/net10.0/compressed/vjnqc7giyd-{0}-tnvetiwcfn-tnvetiwcfn.gz",
     "erp-client/src/Erp.Client/obj/Debug/net10.0/compressed/ym9jcpee2k-{0}-o2ig42qpfw-o2ig42qpfw.gz",
     "erp-client/src/Erp.Client/obj/Debug/net10.0/tmp-webcil/b168326ae4ca45a79b5313d73bef692d/Erp.Client.wasm",
-    "erp-client/src/Erp.Client/obj/Debug/net10.0/tmp-webcil/b168326ae4ca45a79b5313d73bef692d",
     "docs/adr/0014-frakoblet-synk.md"
   ]
 }
