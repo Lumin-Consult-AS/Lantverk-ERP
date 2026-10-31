@@ -74,8 +74,8 @@ services:
 
   erp-core:
     build:
-      context: ./erp-core
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: erp-core/Dockerfile
     container_name: erp-core
     depends_on:
       postgres:

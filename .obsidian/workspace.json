@@ -1,0 +1,204 @@
+{
+  "main": {
+    "id": "2fbb7c3e83ac897d",
+    "type": "split",
+    "children": [
+      {
+        "id": "2b5625c7dcf7e985",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "203143e5b29523e1",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "docs/DEMO_FASE_1.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "DEMO_FASE_1"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "f761771328823ae4",
+    "type": "split",
+    "children": [
+      {
+        "id": "f7a55c93e9816a89",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "87492cd749f856d5",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "3c676ce648170ec1",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "306c5979b066283c",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "ffb0ad3afd9dd9c5",
+    "type": "split",
+    "children": [
+      {
+        "id": "1f96b731fbc1d216",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "e5a2415314f18822",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "docs/DEMO_FASE_1.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks"
+            }
+          },
+          {
+            "id": "add12ee54ef23415",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "docs/DEMO_FASE_1.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links"
+            }
+          },
+          {
+            "id": "181340d398574a02",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "9e0a968e8d5c6a84",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "cec0f59e93054a9c",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "docs/DEMO_FASE_1.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "203143e5b29523e1",
+  "lastOpenFiles": [
+    "erp-client/src/Erp.Client/bin/Debug/net10.0/wwwroot/_framework/Erp.Client.o2ig42qpfw.wasm.gz",
+    "erp-client/src/Erp.Client/bin/Debug/net10.0/wwwroot/_framework/Erp.Client.tnvetiwcfn.pdb.gz",
+    "erp-client/src/Erp.Client/bin/Debug/net10.0/wwwroot/_framework/Erp.Client.tnvetiwcfn.pdb",
+    "erp-client/src/Erp.Client/bin/Debug/net10.0/wwwroot/_framework/Erp.Client.o2ig42qpfw.wasm",
+    "erp-client/src/Erp.Client/obj/Debug/net10.0/compressed/3zey0tpzeh-{0}-uoop5qdhly-uoop5qdhly.gz",
+    "erp-client/src/Erp.Client/obj/Debug/net10.0/compressed/vjnqc7giyd-{0}-tnvetiwcfn-tnvetiwcfn.gz",
+    "erp-client/src/Erp.Client/obj/Debug/net10.0/compressed/ym9jcpee2k-{0}-o2ig42qpfw-o2ig42qpfw.gz",
+    "erp-client/src/Erp.Client/obj/Debug/net10.0/tmp-webcil/b168326ae4ca45a79b5313d73bef692d/Erp.Client.wasm",
+    "erp-client/src/Erp.Client/obj/Debug/net10.0/tmp-webcil/b168326ae4ca45a79b5313d73bef692d",
+    "docs/adr/0014-frakoblet-synk.md"
+  ]
+}
