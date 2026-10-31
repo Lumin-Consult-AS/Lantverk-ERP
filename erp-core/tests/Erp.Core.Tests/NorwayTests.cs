@@ -4,7 +4,9 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Apps;
+using Erp.Core.Infrastructure.Documents;
 using Erp.Core.Infrastructure.Persistence;
+using Erp.Core.Infrastructure.Storage;
 using Erp.Sdk;
 using Finance;
 using Microsoft.AspNetCore.Builder;
@@ -13,7 +15,9 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Norway;
+using Norway.Saft;
 using Npgsql;
 using Xunit;
 
@@ -87,12 +91,13 @@ public sealed class NorwayTests(PostgresDatabaseFixture fixture)
         Assert.True(accounts.Count > 60);
         var vatAccount = accounts.Single(a => Field(a, "number") == "2700");
         Assert.Equal("liability", Field(vatAccount, "accountType"));
-        Assert.Equal("2700", Field(vatAccount, "norway.standardAccount"));
+        Assert.Equal("kortsiktigGjeld", Field(vatAccount, "norway.groupingCategory"));
+        Assert.Equal("2740", Field(vatAccount, "norway.groupingCode"));
         Assert.Equal("receivable", Field(accounts.Single(a => Field(a, "number") == "1500"), "controlType"));
         Assert.Equal("payable", Field(accounts.Single(a => Field(a, "number") == "2400"), "controlType"));
 
         var codes = await QueryAsync(c, "norway.vatcode", "code ne ''", top: 100);
-        Assert.Equal(12, codes.Count);
+        Assert.Equal(13, codes.Count);
         var high = codes.Single(x => Field(x, "code") == "3");
         Assert.Equal("output", Field(high, "direction"));
         Assert.Equal(Id(vatAccount), Guid.Parse(Field(high, "account")!));
@@ -122,11 +127,11 @@ public sealed class NorwayTests(PostgresDatabaseFixture fixture)
         // Add an account of your own, with a SAF-T standard account, and change it
         var own = await CreateAsync(c, "finance.account", new Dictionary<string, object?>
         {
-            ["number"] = "1925", ["name"] = "Sparekonto", ["accountType"] = "asset", ["norway.standardAccount"] = "1920"
+            ["number"] = "1925", ["name"] = "Sparekonto", ["accountType"] = "asset", ["norway.groupingCode"] = "1920"
         });
         using (var change = await PatchAsync(c, "finance.account", own, new Dictionary<string, object?>
                {
-                   ["name"] = "Sparekonto skatt", ["norway.standardAccount"] = "1950"
+                   ["name"] = "Sparekonto skatt", ["norway.groupingCode"] = "1950"
                }))
         {
             Assert.Equal(HttpStatusCode.OK, change.StatusCode);
@@ -134,7 +139,7 @@ public sealed class NorwayTests(PostgresDatabaseFixture fixture)
         }
 
         Assert.Equal("Sparekonto skatt", Field(own, "name"));
-        Assert.Equal("1950", Field(own, "norway.standardAccount"));
+        Assert.Equal("1950", Field(own, "norway.groupingCode"));
 
         // An account that is not used can be removed, also one from the standard chart
         Assert.True(await DeleteAsync(c, "finance.account", own));
@@ -268,7 +273,7 @@ public sealed class NorwayTests(PostgresDatabaseFixture fixture)
 
         // Purchases: 800.00 at 25% deductible (200.00); 90.00 without VAT treatment (code 7)
         await PostAsync(c, "2026-03-12", "Leie", (a["6300"], 800m, 0m, a.Code("1")), (a["1920"], 0m, 1000m, null));
-        await PostAsync(c, "2026-03-13", "Gebyr", (a["7770"], 90m, 0m, a.Code("7")), (a["1920"], 0m, 90m, null));
+        await PostAsync(c, "2026-03-13", "Gebyr", (a["7770"], 90m, 0m, a.Code("0")), (a["1920"], 0m, 90m, null));
 
         // Outside the term
         await PostAsync(c, "2026-05-02", "Mai", (a["1920"], 125m, 0m, null), (a["3000"], 0m, 100m, a.Code("3")));
@@ -289,7 +294,7 @@ public sealed class NorwayTests(PostgresDatabaseFixture fixture)
         Assert.Equal((333.33m, 50m), (Basis("31"), Vat("31")));
         Assert.Equal((2000m, 0m), (Basis("52"), Vat("52")));
         Assert.Equal((800m, 200m), (Basis("1"), Vat("1")));
-        Assert.Equal((90m, 0m), (Basis("7"), Vat("7")));
+        Assert.Equal((90m, 0m), (Basis("0"), Vat("0")));
 
         var result = await c.GetFromJsonAsync<JsonElement>($"{Url("norway.vatreturn")}/{Id(vatReturn)}");
         Assert.Equal(360m, Decimal(result, "outputVat"));
@@ -336,6 +341,216 @@ public sealed class NorwayTests(PostgresDatabaseFixture fixture)
         var secondResult = await c.GetFromJsonAsync<JsonElement>($"{Url("norway.vatreturn")}/{Id(vatReturn)}");
         Assert.Equal(110m, Decimal(secondResult, "outputVat"));
         Assert.Equal(-90m, Decimal(secondResult, "payable"));
+    }
+
+    // ------------------------------------------------------------------ SAF-T export
+
+    [Fact]
+    public async Task ASaftExport_IsMadeInTheBackground_PassesSkatteetatensSchema_AndCarriesBalancesVatAndReversals()
+    {
+        await using var env = await SetUpAsync();
+        var c = env.Client;
+        var a = await AccountsAsync(c);
+        await FillInCompanyAsync(c);
+        var customer = await CreateAsync(c, "core.party", new
+        {
+            partyNumber = "K-1", name = "Kunde 1 AS", partyType = "organization", role = "customer", organizationNumber = "955777888"
+        });
+        var supplier = await CreateAsync(c, "core.party", new
+        {
+            partyNumber = "L-1", name = "Leverandør 1 AS", partyType = "organization", role = "supplier", organizationNumber = "944555666"
+        });
+
+        // February (before the period we export in part two): a sale on credit and a bank deposit
+        var sale = await PostWithPartyAsync(c, "2026-02-10", "Faktura 1001", Id(customer),
+            (a["1500"], 1250m, 0m, null), (a["3000"], 0m, 1000m, a.Code("3")));
+        await PostAsync(c, "2026-02-15", "Innskudd", (a["1920"], 5000m, 0m, null), (a["2000"], 0m, 5000m, null));
+
+        // March: a purchase on credit with deductible VAT, a cash sale, and a credit note reversing the February sale
+        await PostWithPartyAsync(c, "2026-03-05", "Faktura L-77 leie", Id(supplier),
+            (a["6300"], 800m, 0m, a.Code("1")), (a["2400"], 0m, 1000m, null));
+        await PostAsync(c, "2026-03-07", "Kontantsalg", (a["1920"], 625m, 0m, null), (a["3000"], 0m, 500m, a.Code("3")));
+        var entry = (await QueryAsync(c, "finance.journalentry", $"voucher eq '{sale}'")).Single();
+        var credit = await CreateAsync(c, "finance.voucher", new Dictionary<string, object?>
+        {
+            ["voucherDate"] = "2026-03-20", ["description"] = "Kreditnota 1001", ["reverses"] = Id(entry)
+        });
+        await WaitForAsync(async () => (await QueryAsync(c, "finance.voucherline", $"voucher eq '{Id(credit)}'")).Count == 3 ? [] : null);
+        await TransitionAsync(c, "finance.voucher", credit, "post");
+        await WaitForAsync(async () => (await QueryAsync(c, "norway.vatentry", "sourceKey ne ''", top: 100)).Count == 4 ? [] : null);
+
+        // Whole year: valid against the official schema, balanced, with VAT on the base lines
+        var year = await ExportAsync(c, "2026-01-01", "2026-12-31");
+        Assert.True(Field(year.Record, "status") == "done", Field(year.Record, "message"));
+        Assert.Equal(5, int.Parse(Field(year.Record, "transactionCount")!));
+        Assert.Empty(SaftXml.Validate(year.Bytes));
+
+        var ns = System.Xml.Linq.XNamespace.Get(SaftXml.Namespace);
+        var xml = System.Xml.Linq.XDocument.Load(new MemoryStream(year.Bytes)).Root!;
+        Assert.Equal("1.40", xml.Element(ns + "Header")!.Element(ns + "AuditFileVersion")!.Value);
+        var entries = xml.Element(ns + "GeneralLedgerEntries")!;
+        Assert.Equal("5", entries.Element(ns + "NumberOfEntries")!.Value);
+        Assert.Equal(entries.Element(ns + "TotalDebit")!.Value, entries.Element(ns + "TotalCredit")!.Value);
+
+        var taxInfo = entries.Descendants(ns + "TaxInformation").ToList();
+        Assert.Equal(4, taxInfo.Count); // sale, purchase, cash sale, and the credit note on the sale's base line
+        Assert.Contains(taxInfo, t => t.Element(ns + "TaxCode")!.Value == "1" && t.Element(ns + "TaxBase")!.Value == "800"
+                                      && t.Element(ns + "DebitTaxAmount")!.Element(ns + "Amount")!.Value == "200.00");
+        // The credit note puts the VAT of the sale on the opposite side
+        Assert.Equal(2, taxInfo.Count(t => t.Element(ns + "TaxCode")!.Value == "3" && t.Element(ns + "TaxBase")!.Value == "1000"));
+        Assert.Contains(taxInfo, t => t.Element(ns + "TaxBase")!.Value == "1000" && t.Element(ns + "DebitTaxAmount") is not null);
+
+        var master = xml.Element(ns + "MasterFiles")!;
+        Assert.Contains(master.Descendants(ns + "TaxCodeDetails"), t => t.Element(ns + "TaxCode")!.Value == "3" && t.Element(ns + "TaxPercentage")!.Value == "25");
+        Assert.Contains(master.Element(ns + "Customers")!.Elements(ns + "Customer"), cu => cu.Element(ns + "CustomerID")!.Value == "K-1"
+            && cu.Element(ns + "RegistrationNumber")!.Value == "955777888");
+        Assert.Contains(master.Element(ns + "Suppliers")!.Elements(ns + "Supplier"), su => su.Element(ns + "SupplierID")!.Value == "L-1");
+
+        // March only: February is opening balance (the bank deposit), and the result accounts start at the beginning of the year
+        var march = await ExportAsync(c, "2026-03-01", "2026-03-31");
+        Assert.True(Field(march.Record, "status") == "done", Field(march.Record, "message"));
+        Assert.Empty(SaftXml.Validate(march.Bytes));
+        var marchXml = System.Xml.Linq.XDocument.Load(new MemoryStream(march.Bytes)).Root!;
+        Assert.Equal("3", marchXml.Element(ns + "GeneralLedgerEntries")!.Element(ns + "NumberOfEntries")!.Value);
+        System.Xml.Linq.XElement Account(string id) =>
+            marchXml.Element(ns + "MasterFiles")!.Element(ns + "GeneralLedgerAccounts")!.Elements(ns + "Account").Single(x => x.Element(ns + "AccountID")!.Value == id);
+        Assert.Equal("5000.00", Account("1920").Element(ns + "OpeningDebitBalance")!.Value);
+        Assert.Equal("5625.00", Account("1920").Element(ns + "ClosingDebitBalance")!.Value);
+        Assert.Equal("1000.00", Account("3000").Element(ns + "OpeningCreditBalance")!.Value);
+        Assert.Equal("500.00", Account("3000").Element(ns + "ClosingCreditBalance")!.Value);
+        Assert.Equal("salgsinntekt", Account("3000").Element(ns + "GroupingCategory")!.Value);
+        Assert.Equal("3000", Account("3000").Element(ns + "GroupingCode")!.Value);
+    }
+
+    [Fact]
+    public async Task ASaftExport_ThatCannotBeMade_FailsWithAMessage_AndGivesNoFile()
+    {
+        await using var env = await SetUpAsync();
+        var c = env.Client;
+        var a = await AccountsAsync(c);
+        await PostAsync(c, "2026-03-05", "Salg", (a["1920"], 100m, 0m, null), (a["3000"], 0m, 100m, null));
+
+        // No company details
+        var noCompany = await ExportAsync(c, "2026-01-01", "2026-12-31");
+        Assert.Equal("failed", Field(noCompany.Record, "status"));
+        Assert.Contains("firmanavn", Field(noCompany.Record, "message"));
+        Assert.Null(Field(noCompany.Record, "file"));
+
+        // An account in use without a standard account
+        await FillInCompanyAsync(c);
+        using (var clear = await PatchAsync(c, "finance.account", a["3000"], new Dictionary<string, object?> { ["norway.groupingCode"] = "" }))
+        {
+            Assert.Equal(HttpStatusCode.OK, clear.StatusCode);
+        }
+
+        var unmapped = await ExportAsync(c, "2026-01-01", "2026-12-31");
+        Assert.Equal("failed", Field(unmapped.Record, "status"));
+        Assert.Contains("3000", Field(unmapped.Record, "message"));
+
+        // A period that ends before it starts is refused when asking
+        using var backwards = await c.PostAsJsonAsync(Url("norway.saftexport"), new { fromDate = "2026-05-01", toDate = "2026-04-01" });
+        Assert.Equal(HttpStatusCode.BadRequest, backwards.StatusCode);
+    }
+
+    [Fact]
+    public void TheChartAndTheVatCodes_AgreeWithSkatteetatensOfficialLists()
+    {
+        var dir = Path.Combine(System.AppContext.BaseDirectory, "TestData", "saft");
+        var standard = System.Xml.Linq.XDocument.Load(Path.Combine(dir, "General_Ledger_Standard_Accounts_4_character.xml")).Root!
+            .Elements("Account").ToDictionary(x => x.Element("AccountID")!.Value, x => x.Elements("Description").First(d => d.Attribute("ISOLanguageCode")!.Value == "NOB").Value);
+        var grouping = File.ReadLines(Path.Combine(dir, "naeringsspesifikasjon.csv")).Skip(1).Select(l => l.TrimStart('﻿').Split(';'))
+            .Select(c => (c[0], c[3])).ToHashSet();
+        var official = System.Xml.Linq.XDocument.Load(Path.Combine(dir, "Standard_Tax_Codes.xml")).Root!.Elements("TaxCode")
+            .ToDictionary(x => x.Element("ID")!.Value, x => x.Element("TaxRate")?.Value);
+
+        var appDir = FindAppDirectory();
+        foreach (var row in File.ReadLines(Path.Combine(appDir, "Data", "chart-of-accounts.csv")).Skip(1).Select(l => l.Split(';')))
+        {
+            Assert.True(standard.ContainsKey(row[0]), $"Account {row[0]} ({row[1]}) is not in the official standard account list.");
+            Assert.Equal(standard[row[0]], row[1]); // the name is the official one
+            Assert.True(grouping.Contains((row[4], row[5])), $"Grouping {row[4]}/{row[5]} of account {row[0]} is not in the official list.");
+        }
+
+        var rates = new Dictionary<string, decimal?>
+        {
+            ["Regular rate"] = 25m, ["Reduced rate, middle"] = 15m, ["Reduced rate, raw fish"] = 11.11m, ["Reduced rate, low"] = 12m, ["Zero rate"] = 0m, [""] = null
+        };
+        foreach (var row in File.ReadLines(Path.Combine(appDir, "Data", "vat-codes.csv")).Skip(1).Select(l => l.Split(';')))
+        {
+            Assert.True(official.ContainsKey(row[0]), $"VAT code {row[0]} is not an official standard tax code.");
+            if (official[row[0]] is { } label)
+            {
+                Assert.Equal(rates[label], decimal.Parse(row[4], System.Globalization.CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                Assert.Equal(0m, decimal.Parse(row[4], System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
+    }
+
+    private static string FindAppDirectory()
+    {
+        var dir = new DirectoryInfo(System.AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "erp-apps", "norway")))
+        {
+            dir = dir.Parent;
+        }
+
+        return Path.Combine(dir!.FullName, "erp-apps", "norway");
+    }
+
+    private sealed record Exported(JsonElement Record, byte[] Bytes);
+
+    private static async Task FillInCompanyAsync(HttpClient c)
+    {
+        var settings = (await QueryAsync(c, "norway.settings", "singleton eq 'settings'")).Single();
+        using var res = await PatchAsync(c, "norway.settings", settings, new Dictionary<string, object?>
+        {
+            ["companyName"] = "Demohandel AS", ["organizationNumber"] = "999888777", ["vatRegistered"] = true,
+            ["contactFirstName"] = "Kari", ["contactLastName"] = "Nordmann", ["telephone"] = "22334455", ["email"] = "post@demohandel.no",
+            ["street"] = "Storgata 1", ["postalCode"] = "0155", ["city"] = "Oslo"
+        });
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+    }
+
+    private static async Task<Exported> ExportAsync(HttpClient c, string from, string to)
+    {
+        var requested = await CreateAsync(c, "norway.saftexport", new { fromDate = from, toDate = to });
+        Assert.Equal("requested", Field(requested, "status"));
+        var done = await WaitForAsync(async () =>
+        {
+            var current = await c.GetFromJsonAsync<JsonElement>($"{Url("norway.saftexport")}/{Id(requested)}");
+            return Field(current, "status") != "requested" ? [current.Clone()] : null;
+        });
+        var record = done[0];
+        var bytes = Field(record, "file") is { } fileId ? await c.GetByteArrayAsync($"/api/v1/files/{fileId}/content") : [];
+        return new Exported(record, bytes);
+    }
+
+    private static async Task<Guid> PostWithPartyAsync(
+        HttpClient c, string date, string text, Guid party, params (JsonElement Account, decimal Debit, decimal Credit, JsonElement? Code)[] lines)
+    {
+        var voucher = await CreateVoucherAsync(c, date, text);
+        foreach (var (account, debit, credit, code) in lines)
+        {
+            var isControl = Field(account, "controlType") is "receivable" or "payable";
+            await CreateAsync(c, "finance.voucherline", new Dictionary<string, object?>
+            {
+                ["voucher"] = Id(voucher),
+                ["account"] = Id(account),
+                ["debit"] = debit,
+                ["credit"] = credit,
+                ["party"] = isControl ? party : null,
+                ["dueDate"] = isControl ? "2026-12-31" : null,
+                ["norway.vatCode"] = code is { } vc ? Id(vc) : null
+            });
+        }
+
+        await TransitionAsync(c, "finance.voucher", voucher, "post");
+        var entry = (await QueryAsync(c, "finance.journalentry", $"voucher eq '{Id(voucher)}'")).Single();
+        await WaitForAsync(async () => (await QueryAsync(c, "norway.vatentry", $"entry eq '{Id(entry)}'")).Count >= lines.Count(l => l.Code is not null) ? [] : null);
+        return Id(voucher);
     }
 
     // ------------------------------------------------------------------ separation
@@ -565,6 +780,19 @@ public sealed class NorwayTests(PostgresDatabaseFixture fixture)
                     ["Email:SmtpHost"] = ""
                 });
             });
+
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IObjectStorage>();
+                services.AddSingleton<IObjectStorage>(new InMemoryObjectStorage());
+                services.RemoveAll<IVirusScanner>();
+                services.AddSingleton<IVirusScanner, CleanScanner>();
+            });
         });
+    }
+
+    private sealed class CleanScanner : IVirusScanner
+    {
+        public Task<ScanResult> ScanAsync(byte[] content, CancellationToken cancellationToken) => Task.FromResult(new ScanResult(ScanOutcome.Clean));
     }
 }

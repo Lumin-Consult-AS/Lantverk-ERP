@@ -10,4 +10,5 @@ code;name;direction;account;rate;validFrom
 5;Salg fritatt for MVA (innenfor loven);output;;0;2022-01-01
 52;Utførsel av varer og tjenester;output;;0;2022-01-01
 6;Salg utenfor MVA-loven;output;;0;2022-01-01
-7;Kjøp uten MVA-behandling;input;;0;2022-01-01
+0;Ingen MVA-behandling (anskaffelser);input;;0;2022-01-01
+7;Ingen MVA-behandling (inntekter);output;;0;2022-01-01

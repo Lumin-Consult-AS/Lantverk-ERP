@@ -26,6 +26,7 @@ retention:
 enums:
   norway.vatdirection: [output, input]
   norway.vatreturnstatus: [draft, calculated]
+  norway.exportstatus: [requested, done, failed]
 
 objects:
   # Én post per selskap: hvilken versjon av kontoplan og MVA-koder som er lagt inn. Å opprette posten (siden «Norsk oppsett»)
@@ -43,6 +44,48 @@ objects:
         type: string
         maxLength: 20
         label: Innlagt versjon
+      companyName:
+        type: string
+        maxLength: 200
+        label: Firmanavn (SAF-T)
+      organizationNumber:
+        type: string
+        maxLength: 9
+        pattern: "^[0-9]{9}$"
+        label: Organisasjonsnummer
+      vatRegistered:
+        type: boolean
+        required: true
+        default: true
+        label: MVA-registrert
+      contactFirstName:
+        type: string
+        maxLength: 100
+        label: Kontaktperson, fornavn
+      contactLastName:
+        type: string
+        maxLength: 100
+        label: Kontaktperson, etternavn
+      telephone:
+        type: string
+        maxLength: 30
+        label: Telefon
+      email:
+        type: string
+        maxLength: 200
+        label: E-post
+      street:
+        type: string
+        maxLength: 200
+        label: Gateadresse
+      postalCode:
+        type: string
+        maxLength: 10
+        label: Postnummer
+      city:
+        type: string
+        maxLength: 100
+        label: Sted
     keys:
       - name: uk_norway_settings_company
         fields: [singleton]
@@ -220,7 +263,41 @@ objects:
         scale: 2
         label: Avgift
 
-# MVA-kode på bilagslinjen, og SAF-T-standardkonto på kontoen. Linjer som appen lager for MVA-beløpet peker tilbake
+  # Eksport av SAF-T Regnskap for en periode. Å opprette posten ber om eksporten; den lages i bakgrunnen, sjekkes mot
+  # Skatteetatens skjema og lagres som en fil som kan lastes ned (id i feltet «Fil»).
+  norway.saftexport:
+    label: SAF-T-eksport
+    fields:
+      fromDate:
+        type: date
+        required: true
+        label: Fra dato
+      toDate:
+        type: date
+        required: true
+        label: Til dato
+      status:
+        type: enum
+        of: norway.exportstatus
+        required: true
+        default: requested
+        label: Status
+      file:
+        type: uuid
+        label: Fil
+      fileName:
+        type: string
+        maxLength: 200
+        label: Filnavn
+      message:
+        type: string
+        maxLength: 2000
+        label: Melding
+      transactionCount:
+        type: integer
+        label: Antall bilag
+
+# MVA-kode på bilagslinjen, og SAF-T grupperingskategori og -kode på kontoen. Linjer som appen lager for MVA-beløpet peker tilbake
 # til linjen med grunnlaget.
 extensions:
   finance.voucherline:
@@ -234,17 +311,23 @@ extensions:
         label: MVA for linje
   finance.account:
     fields:
-      standardAccount:
+      groupingCategory:
         type: string
-        maxLength: 10
-        label: SAF-T-standardkonto
+        maxLength: 200
+        label: SAF-T grupperingskategori
+      groupingCode:
+        type: string
+        maxLength: 20
+        label: SAF-T grupperingskode
 
 events:
   publishes:
     - norway.setup.requested@1
+    - norway.saftexport.requested@1
   subscribes:
     - core.fiscalyear.created@1: OnFiscalYearCreated
     - norway.setup.requested@1: OnSetupRequested
+    - norway.saftexport.requested@1: OnSaftExportRequested
     - finance.journal.posted@1: OnJournalPosted
 
 pages:
@@ -254,6 +337,7 @@ pages:
   - pages/vatentry-list.yaml
   - pages/vatreturn-list.yaml
   - pages/vatreturn-card.yaml
+  - pages/saftexport-list.yaml
   - extend: finance.account-card
     file: pages/account-card-ext.yaml
 
@@ -264,6 +348,7 @@ permissionSets:
       norway.settings: [read, create, update]
       norway.vatcode: [read, create, update, delete]
       norway.vatrate: [read, create, update, delete]
+      norway.saftexport: [read, create, delete]
   - id: norway.reader
     label: Norge-pakken – lesetilgang
     grants:
@@ -273,6 +358,7 @@ permissionSets:
       norway.vatentry: [read]
       norway.vatreturn: [read]
       norway.vatreturnline: [read]
+      norway.saftexport: [read]
   - id: norway.bookkeeper
     label: Norge-pakken – MVA
     grants:
@@ -282,3 +368,4 @@ permissionSets:
       norway.vatentry: [read, create]
       norway.vatreturn: [read, create, update, delete, post]
       norway.vatreturnline: [read, create, update, delete]
+      norway.saftexport: [read, create, delete]

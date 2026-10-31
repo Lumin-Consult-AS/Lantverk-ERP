@@ -3,4 +3,14 @@ type: list
 object: norway.settings
 title: norway.settings.title
 columns:
+  - companyName
+  - organizationNumber
+  - vatRegistered
+  - contactFirstName
+  - contactLastName
+  - telephone
+  - email
+  - street
+  - postalCode
+  - city
   - chartVersion

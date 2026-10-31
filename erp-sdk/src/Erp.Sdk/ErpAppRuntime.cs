@@ -246,6 +246,21 @@ internal sealed class GrpcAppWorkflowClient(WorkflowService.WorkflowServiceClien
 
 internal sealed class GrpcAppDocumentClient(DocumentService.DocumentServiceClient client, CallContextProto context) : IAppDocumentClient
 {
+    public async Task<Guid> StoreDocumentAsync(string fileName, string contentType, byte[] content, CancellationToken cancellationToken = default)
+    {
+        var res = await client.StoreDocumentAsync(
+            new StoreDocumentRequest
+            {
+                Context = context,
+                FileName = fileName,
+                ContentType = contentType,
+                Content = Google.Protobuf.ByteString.CopyFrom(content)
+            },
+            GrpcAppDataClient.CreateAuthHeaders(context),
+            cancellationToken: cancellationToken);
+        return Guid.Parse(res.FileId);
+    }
+
     public async Task<AppDocumentFile?> GetDocumentAsync(Guid fileId, CancellationToken cancellationToken = default)
     {
         var res = await client.GetDocumentAsync(

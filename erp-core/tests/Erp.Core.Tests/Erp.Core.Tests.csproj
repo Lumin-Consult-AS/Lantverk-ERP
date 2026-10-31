@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="TestData\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Erp.Core.Domain\Erp.Core.Domain.csproj" />
     <ProjectReference Include="..\..\src\Erp.Core.Infrastructure\Erp.Core.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Erp.Core.Api\Erp.Core.Api.csproj" />

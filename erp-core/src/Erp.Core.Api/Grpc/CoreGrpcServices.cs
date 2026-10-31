@@ -371,6 +371,28 @@ public sealed class CoreDocumentGrpcService(
         }
     }
 
+    public override async Task<StoreDocumentResponse> StoreDocument(StoreDocumentRequest request, ServerCallContext context)
+    {
+        using var scope = Authenticate(request.Context, context);
+        await permissions.RequireAsync("core.file", "create", context.CancellationToken);
+
+        Guid? companyId = Guid.TryParse(request.Context.CompanyId, out var company) ? company : null;
+        try
+        {
+            var stored = await files.StoreAsync(
+                request.FileName, request.ContentType, request.Content.ToByteArray(), companyId, "generated", trusted: false, context.CancellationToken);
+            return new StoreDocumentResponse { FileId = stored.File.Id.ToString("D"), Sha256 = stored.File.Sha256, Duplicate = stored.Duplicate };
+        }
+        catch (RecordValidationException ex)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        }
+        catch (Exception ex) when (ex is not RpcException and not OperationCanceledException)
+        {
+            throw new RpcException(new Status(StatusCode.Internal, $"{ex.GetType().Name}: {ex.Message}"));
+        }
+    }
+
     public override Task<InboxItemProto> ClaimInboxItem(InboxItemActionRequest request, ServerCallContext context) =>
         ActAsync(request, context, (item, by, ct) => inbox.ClaimAsync(item, by, ct));
 

@@ -1,4 +1,6 @@
 extend: finance.account-card
 fields:
   - after: finance.account.controlType
-    field: norway.standardAccount
+    field: norway.groupingCategory
+  - after: norway.groupingCategory
+    field: norway.groupingCode
