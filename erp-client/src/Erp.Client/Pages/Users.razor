@@ -1,0 +1,123 @@
+@page "/users"
+@inject ErpApiClient Api
+@inject I18nService I18n
+
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudText Typo="Typo.h6" Class="mb-2">@I18n.T("ui.users.title")</MudText>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">@I18n.T("ui.users.rolesNote")</MudText>
+
+    @if (_message is not null)
+    {
+        <MudAlert Severity="@(_isError ? Severity.Error : Severity.Success)" Class="my-3">@_message</MudAlert>
+    }
+
+    @if (_denied)
+    {
+        <MudAlert Severity="Severity.Warning" Class="my-3">@I18n.T("ui.users.adminOnly")</MudAlert>
+    }
+    else
+    {
+        <MudTable Items="_users" Dense="true" Hover="true" Class="mt-3">
+            <HeaderContent>
+                <MudTh>@I18n.T("ui.users.name")</MudTh>
+                <MudTh>@I18n.T("ui.users.email")</MudTh>
+                <MudTh>@I18n.T("ui.users.roles")</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.DisplayName<br /><MudText Typo="Typo.caption" Class="mud-text-secondary">@(context.IsActive ? I18n.T("ui.users.active") : I18n.T("ui.users.inactive"))</MudText></MudTd>
+                <MudTd>@context.Email</MudTd>
+                <MudTd>
+                    <MudTextField T="string" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Value="@RolesText(context)" ValueChanged="@(v => _edited[context.Id] = v)"
+                                  Immediate="true" />
+                </MudTd>
+                <MudTd>
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => SaveRolesAsync(context))">@I18n.T("ui.users.save")</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => ToggleActiveAsync(context))">
+                        @(context.IsActive ? I18n.T("ui.users.deactivate") : I18n.T("ui.users.activate"))
+                    </MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+
+        <MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">@I18n.T("ui.users.add")</MudText>
+        <MudGrid>
+            <MudItem xs="12" sm="6"><MudTextField T="string" Label="@I18n.T("ui.users.subject")" @bind-Value="_newSubject" Variant="Variant.Outlined" /></MudItem>
+            <MudItem xs="12" sm="6"><MudTextField T="string" Label="@I18n.T("ui.users.email")" @bind-Value="_newEmail" Variant="Variant.Outlined" /></MudItem>
+            <MudItem xs="12" sm="6"><MudTextField T="string" Label="@I18n.T("ui.users.name")" @bind-Value="_newName" Variant="Variant.Outlined" /></MudItem>
+            <MudItem xs="12" sm="6"><MudTextField T="string" Label="@I18n.T("ui.users.roles")" @bind-Value="_newRoles" Variant="Variant.Outlined" /></MudItem>
+        </MudGrid>
+        <MudButton Class="mt-2" Variant="Variant.Filled" Color="Color.Primary" OnClick="AddAsync">@I18n.T("ui.users.add")</MudButton>
+    }
+</MudPaper>
+
+@code {
+    private List<ClientAdminUser> _users = [];
+    private readonly Dictionary<Guid, string> _edited = [];
+    private string? _message;
+    private bool _isError;
+    private bool _denied;
+    private string _newSubject = string.Empty;
+    private string _newEmail = string.Empty;
+    private string _newName = string.Empty;
+    private string _newRoles = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _users = (await Api.GetAdminUsersAsync()).ToList();
+            _denied = false;
+        }
+        catch (Exception)
+        {
+            _denied = true;
+        }
+    }
+
+    private string RolesText(ClientAdminUser user) =>
+        _edited.TryGetValue(user.Id, out var text) ? text : string.Join(", ", user.Roles);
+
+    private static List<string> ParseRoles(string text) =>
+        text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private async Task SaveRolesAsync(ClientAdminUser user)
+    {
+        await RunAsync(async () =>
+        {
+            await Api.SetUserRolesAsync(user.Id, ParseRoles(RolesText(user)));
+            _edited.Remove(user.Id);
+        });
+    }
+
+    private async Task ToggleActiveAsync(ClientAdminUser user) =>
+        await RunAsync(async () => await Api.SetUserActiveAsync(user.Id, !user.IsActive));
+
+    private async Task AddAsync()
+    {
+        await RunAsync(async () =>
+        {
+            await Api.CreateUserAsync(_newSubject, _newEmail, _newName, ParseRoles(_newRoles));
+            _newSubject = _newEmail = _newName = _newRoles = string.Empty;
+        });
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+            _message = I18n.T("ui.users.save");
+            _isError = false;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message;
+            _isError = true;
+        }
+    }
+}

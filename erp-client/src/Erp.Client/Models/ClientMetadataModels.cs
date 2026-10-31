@@ -46,6 +46,17 @@ public sealed class ClientUserSummary
     public List<string> Roles { get; set; } = [];
 }
 
+/// <summary>A user as an administrator sees them (user administration).</summary>
+public sealed class ClientAdminUser
+{
+    public Guid Id { get; set; }
+    public string ExternalSubject { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public List<string> Roles { get; set; } = [];
+    public bool IsActive { get; set; }
+}
+
 public sealed class ClientInstalledAppSummary
 {
     public string AppId { get; set; } = string.Empty;

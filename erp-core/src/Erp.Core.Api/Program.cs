@@ -377,6 +377,7 @@ v1.MapAppManagementEndpoints();
 v1.MapEventEndpoints();
 v1.MapWorkflowEndpoints();
 v1.MapRoleEndpoints();
+v1.MapUserEndpoints();
 v1.MapDocumentEndpoints();
 v1.MapSyncEndpoints();
 app.MapGroup("/api/v1").MapInboundEndpoints();

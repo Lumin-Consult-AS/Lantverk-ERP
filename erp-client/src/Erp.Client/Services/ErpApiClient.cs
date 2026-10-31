@@ -388,6 +388,34 @@ public sealed class ErpApiClient(HttpClient httpClient, I18nService i18n)
         await EnsureSuccessOrThrowReadableAsync(res, ct);
     }
 
+    // ---- user administration (tenant administrators)
+
+    public async Task<IReadOnlyList<ClientAdminUser>> GetAdminUsersAsync(CancellationToken ct = default) =>
+        await httpClient.GetFromJsonAsync<List<ClientAdminUser>>("/api/v1/users", JsonOptions, ct) ?? [];
+
+    public async Task<ClientAdminUser> CreateUserAsync(
+        string externalSubject, string email, string displayName, IReadOnlyList<string> roles, CancellationToken ct = default)
+    {
+        using var res = await httpClient.PostAsJsonAsync(
+            "/api/v1/users", new { externalSubject, email, displayName, roles }, JsonOptions, ct);
+        await EnsureSuccessOrThrowReadableAsync(res, ct);
+        return (await res.Content.ReadFromJsonAsync<ClientAdminUser>(JsonOptions, ct))!;
+    }
+
+    public async Task<ClientAdminUser> SetUserRolesAsync(Guid id, IReadOnlyList<string> roles, CancellationToken ct = default)
+    {
+        using var res = await httpClient.PutAsJsonAsync($"/api/v1/users/{id:D}/roles", new { roles }, JsonOptions, ct);
+        await EnsureSuccessOrThrowReadableAsync(res, ct);
+        return (await res.Content.ReadFromJsonAsync<ClientAdminUser>(JsonOptions, ct))!;
+    }
+
+    public async Task<ClientAdminUser> SetUserActiveAsync(Guid id, bool active, CancellationToken ct = default)
+    {
+        using var res = await httpClient.PostAsync($"/api/v1/users/{id:D}/{(active ? "activate" : "deactivate")}", null, ct);
+        await EnsureSuccessOrThrowReadableAsync(res, ct);
+        return (await res.Content.ReadFromJsonAsync<ClientAdminUser>(JsonOptions, ct))!;
+    }
+
     public async Task<IReadOnlyList<ClientUserSummary>> GetUsersAsync(CancellationToken ct = default) =>
         await httpClient.GetFromJsonAsync<List<ClientUserSummary>>("/api/v1/core/users", JsonOptions, ct) ?? [];
 
