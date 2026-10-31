@@ -276,6 +276,20 @@ public sealed class RecordDataService(
             foreach (var field in objectDef.Fields)
             {
                 var hasValue = TryGetFieldInput(fields, field, objectDef.OwnerApp, out var rawValue);
+                if (field.NumberSeries is not null)
+                {
+                    if (hasValue && !WhenRuleEvaluator.IsValueEmpty(rawValue))
+                    {
+                        throw new RecordValidationException(
+                            $"Field '{field.Name}' on '{objectDef.Id}' is assigned by a number series and cannot be set.",
+                            field.Name);
+                    }
+
+                    // Advanced in this transaction: a failed create rolls the counter back too, so the series has no gaps.
+                    rawValue = await AllocateNumberAsync(conn, tx, objectDef, field, effectiveCompanyId, now, cancellationToken);
+                    hasValue = true;
+                }
+
                 if (!hasValue || rawValue is null)
                 {
                     if (field.DefaultValue is not null)
@@ -428,6 +442,13 @@ public sealed class RecordDataService(
                 if (!TryGetFieldInput(fields, field, objectDef.OwnerApp, out var rawValue))
                 {
                     continue;
+                }
+
+                if (field.NumberSeries is not null)
+                {
+                    throw new RecordValidationException(
+                        $"Field '{field.Name}' on '{objectDef.Id}' is assigned by a number series and cannot be changed.",
+                        field.Name);
                 }
 
                 if (rawValue is null && field.Required)
@@ -1632,6 +1653,26 @@ public sealed class RecordDataService(
         }
 
         return payload;
+    }
+
+    private static async Task<string> AllocateNumberAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        ObjectDefinition objectDef,
+        FieldDefinition field,
+        Guid? companyId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var series = field.NumberSeries!;
+        var year = now.UtcDateTime.Year;
+        await using var cmd = CreateCommand(conn, tx, "SELECT core.next_number(@company, @object, @field, @period);");
+        AddParameter(cmd, "company", (object?)companyId ?? DBNull.Value);
+        AddParameter(cmd, "object", objectDef.Id);
+        AddParameter(cmd, "field", field.Name);
+        AddParameter(cmd, "period", series.PerYear ? year : 0);
+        var number = Convert.ToInt64(await cmd.ExecuteScalarAsync(cancellationToken));
+        return series.Format(number, year);
     }
 
     private static Dictionary<string, object?> BuildEffectiveFieldsForCreate(

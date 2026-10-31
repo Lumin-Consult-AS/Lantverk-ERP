@@ -23,12 +23,12 @@ Disse må avgjøres av deg før respektive steg starter. Kodeagenten stopper og 
 
 | # | Beslutning | Trengs før | Anbefaling |
 | --- | --- | --- | --- |
-| B1 | Navn og ID-er: regnskapsappen (`finance`?) og Norge-pakken (`norway`?) | Steg 3 | `finance` og `norway`; egne ADR-er |
+| B1 | Navn og ID-er: regnskapsappen (`finance`?) og Norge-pakken (`norway`?) | Steg 3 | **Avgjort 31. oktober 2026:** `finance` og `norway`. ADR-0018 |
 | B2 | Hvem er regnskapsfører/revisor som verifiserer lovkravene? (åpent spørsmål i planen) | Steg 3 (design av hovedbok) | Finn tidlig; kravet er en autorisert regnskapsfører som kan teste |
-| B3 | Aggregering: skal data-API-et få summering/gruppering (kjernen), eller beregner regnskapsappen selv? | Steg 0 | Generell aggregering i data-API-et (sum, count, gruppering): domene-uavhengig og trengs av alle rapporter |
-| B4 | Lisens og prising per app (planen sier at det må inn i kjernen) | Steg 0 eller før pilot | Utsett til før første pilot; skriv en ADR som sier det |
-| B5 | Aritma: partnervilkår, pris og API-tilgang | Steg 6 (Aritma-adapter) | Avklar nå; filadapteren (ISO 20022) bygges uavhengig |
-| B6 | EHF-aksesspunkt (PEPPOL) | Steg 9 | Velg leverandør med EU-drift og sandkasse |
+| B3 | Aggregering: skal data-API-et få summering/gruppering (kjernen), eller beregner regnskapsappen selv? | Steg 0 | **Avgjort 31. oktober 2026:** generell aggregering i data-API-et (sum, count, gruppering). ADR-0016 |
+| B4 | Lisens og prising per app (planen sier at det må inn i kjernen) | Steg 0 eller før pilot | **Avgjort 31. oktober 2026:** utsettes til før første pilot. ADR-0017 |
+| B5 | Aritma: partnervilkår, pris og API-tilgang | Steg 6 (Aritma-adapter) | Avklar nå; filadapteren (ISO 20022) bygges uavhengig. **Status 31. oktober 2026:** dialog pågår, møte med Aritma mandag |
+| B6 | EHF-aksesspunkt (PEPPOL) | Steg 9 | Velg leverandør med EU-drift og sandkasse. **Status 31. oktober 2026:** søknad om sandkasse sendt til Storecove (kandidat, ikke endelig valg); sammenlign med minst ett norsk aksesspunkt før valg |
 | B7 | AI-leverandør i EU til fakturatolk | Steg 8 | Velg leverandør som lover EU-behandling uten trening på kundedata |
 | B8 | Skatteetaten/Altinn: systemleverandørstatus, Maskinporten og systembruker. Avklaring med Knowit er en forutsetning | Steg 10 (innsending) | Søk tidlig, siden saksbehandling tar tid. Generering og validering bygges uten |
 | B9 | Pilotkunde (helst før fase 2 er ferdig) | Før fase 3 | Begynn å lete nå |
@@ -48,7 +48,7 @@ Disse må avgjøres av deg før respektive steg starter. Kodeagenten stopper og 
 
 **Ferdig når** en testapp kan bruke en hullfri nummerserie, et uforanderlig objekt avvises ved endring også via direkte SQL som applikasjonsrollen, og en aggregeringsspørring gir riktig sum per gruppe for kun egen tenant (tester som beviser at data ikke lekker).
 
-**Beslutning først:** B3, og B4 som en ADR.
+**Beslutninger:** B3 og B4 er avgjort (ADR-0016 og ADR-0017). Lisens og prising bygges ikke i steg 0.
 
 ---
 

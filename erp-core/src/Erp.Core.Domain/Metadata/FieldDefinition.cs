@@ -41,6 +41,12 @@ public sealed class FieldDefinition
     public bool EditableInWorkflow { get; set; }
 
     /// <summary>
+    /// When set, the value is assigned by the system from a gap-free number series on create and cannot be supplied or
+    /// changed afterwards.
+    /// </summary>
+    public NumberSeriesDefinition? NumberSeries { get; set; }
+
+    /// <summary>
     /// Target object ID (e.g. <c>core.party</c>) when <see cref="Type"/> is <see cref="FieldType.Reference"/>.
     /// </summary>
     public string? TargetObject { get; set; }
