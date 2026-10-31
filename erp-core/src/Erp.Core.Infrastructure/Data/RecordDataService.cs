@@ -118,6 +118,138 @@ public sealed class RecordDataService(
         }, cancellationToken);
     }
 
+    private static readonly Regex AggregateAliasPattern = new("^[A-Za-z][A-Za-z0-9_]{0,40}$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Summaries (count, sum, avg, min, max) with optional grouping, over the same records and with the same permission,
+    /// company and tenant rules as <see cref="QueryAsync"/> (ADR-0016). Each row has the group-by fields and the measure
+    /// aliases as keys.
+    /// </summary>
+    public async Task<IReadOnlyList<Dictionary<string, object?>>> AggregateAsync(
+        string objectId,
+        AggregateQuery query,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        await RequirePermissionAsync(objectId, "read", cancellationToken);
+        var objectDef = await RequireObjectAsync(objectId, cancellationToken);
+        var (schema, table) = objectDef.GetSchemaAndTable();
+
+        if (query.Measures.Count == 0)
+        {
+            throw new RecordValidationException("An aggregate query needs at least one measure.");
+        }
+
+        var groupBy = query.GroupBy ?? [];
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var selectParts = new List<string>();
+        var groupColumns = new List<string>();
+        foreach (var group in groupBy)
+        {
+            var (column, type) = ResolveFilterTargetColumn(group, objectDef);
+            if (type is FieldType.Json or FieldType.Text)
+            {
+                throw new RecordValidationException($"Cannot group by '{group}': {type} fields are not groupable.", group);
+            }
+
+            if (!AggregateAliasPattern.IsMatch(group.Replace(".", "_", StringComparison.Ordinal)) || !names.Add(group))
+            {
+                throw new RecordValidationException($"Invalid or duplicate group-by field '{group}'.", group);
+            }
+
+            groupColumns.Add($"\"{column}\"");
+            selectParts.Add($"\"{column}\" AS \"{group}\"");
+        }
+
+        foreach (var measure in query.Measures)
+        {
+            var function = (measure.Function ?? string.Empty).Trim().ToLowerInvariant();
+            if (function is not ("count" or "sum" or "avg" or "min" or "max"))
+            {
+                throw new RecordValidationException($"Unknown aggregate function '{measure.Function}'. Use count, sum, avg, min or max.");
+            }
+
+            if (!AggregateAliasPattern.IsMatch(measure.Alias ?? string.Empty) || !names.Add(measure.Alias!))
+            {
+                throw new RecordValidationException($"Measure alias '{measure.Alias}' must be unique and match [A-Za-z][A-Za-z0-9_]*.");
+            }
+
+            if (function == "count" && string.IsNullOrWhiteSpace(measure.Field))
+            {
+                selectParts.Add($"count(*) AS \"{measure.Alias}\"");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(measure.Field))
+            {
+                throw new RecordValidationException($"Aggregate '{function}' needs a field.", measure.Alias);
+            }
+
+            var (column, type) = ResolveFilterTargetColumn(measure.Field, objectDef);
+            var numeric = type is FieldType.Integer or FieldType.Decimal or FieldType.Money;
+            if (function is "sum" or "avg" && !numeric)
+            {
+                throw new RecordValidationException($"Cannot {function} '{measure.Field}': it is not a numeric field.", measure.Field);
+            }
+
+            if (function is "min" or "max" && type is FieldType.Json or FieldType.Blob or FieldType.Boolean)
+            {
+                throw new RecordValidationException($"Cannot {function} '{measure.Field}'.", measure.Field);
+            }
+
+            selectParts.Add($"{function}(\"{column}\") AS \"{measure.Alias}\"");
+        }
+
+        return await ExecuteWithConnectionAsync(async (conn, tx) =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+
+            var whereClauses = new List<string>();
+            if (companyId.HasValue && objectDef.IsCompanyScoped)
+            {
+                whereClauses.Add("(company_id = @companyId OR company_id IS NULL)");
+                AddParameter(cmd, "companyId", companyId.Value);
+            }
+
+            if (query.Filter is not null)
+            {
+                var paramIndex = 0;
+                whereClauses.Add(CompileFilterNode(query.Filter, objectDef, cmd, ref paramIndex));
+            }
+
+            var sql = new StringBuilder($"""SELECT {string.Join(", ", selectParts)} FROM "{schema}"."{table}" """);
+            if (whereClauses.Count > 0)
+            {
+                sql.Append("WHERE ").Append(string.Join(" AND ", whereClauses)).Append(' ');
+            }
+
+            if (groupColumns.Count > 0)
+            {
+                sql.Append("GROUP BY ").Append(string.Join(", ", groupColumns))
+                    .Append(" ORDER BY ").Append(string.Join(", ", groupColumns)).Append(' ');
+            }
+
+            sql.Append($"LIMIT {Math.Clamp(query.Top <= 0 ? 1000 : query.Top, 1, 5000)};");
+            cmd.CommandText = sql.ToString();
+
+            var rows = new List<Dictionary<string, object?>>();
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                for (var i = 0; i < reader.FieldCount; i++)
+                {
+                    row[reader.GetName(i)] = await reader.IsDBNullAsync(i, cancellationToken) ? null : reader.GetValue(i);
+                }
+
+                rows.Add(row);
+            }
+
+            return (IReadOnlyList<Dictionary<string, object?>>)rows;
+        }, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<RecordData>> QueryAsync(
         string objectId,
         DataQuery query,

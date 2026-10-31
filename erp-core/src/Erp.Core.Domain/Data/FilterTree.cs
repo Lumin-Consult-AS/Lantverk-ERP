@@ -53,6 +53,16 @@ public sealed record DataQuery(
     int Top = 50,
     int Skip = 0);
 
+/// <summary>One calculated column of an aggregate query: <c>count</c>, <c>sum</c>, <c>avg</c>, <c>min</c> or <c>max</c>.</summary>
+public sealed record AggregateMeasure(string Function, string? Field, string Alias);
+
+/// <summary>Summaries over records: measures per distinct combination of the group-by fields.</summary>
+public sealed record AggregateQuery(
+    IReadOnlyList<AggregateMeasure> Measures,
+    FilterNode? Filter = null,
+    IReadOnlyList<string>? GroupBy = null,
+    int Top = 1000);
+
 public enum BatchMethod
 {
     Create,
