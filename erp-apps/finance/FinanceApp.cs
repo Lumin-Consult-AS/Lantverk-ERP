@@ -10,7 +10,7 @@ public sealed record FiscalYearCreated(Guid FiscalyearId);
 /// postings and the open items of the sub-ledger. Everything runs through the core's data API, so permissions, tenant
 /// isolation and the immutability of posted records are the core's.
 /// </summary>
-public sealed class FinanceApp : AppBase
+public sealed partial class FinanceApp : AppBase
 {
     private const string Voucher = "finance.voucher";
     private const string Line = "finance.voucherline";

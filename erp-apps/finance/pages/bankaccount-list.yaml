@@ -1,0 +1,9 @@
+id: finance.bankaccount-list
+type: list
+object: finance.bankaccount
+title: finance.bankaccounts.title
+columns:
+  - name
+  - accountNumber
+  - ledgerAccount
+  - currency

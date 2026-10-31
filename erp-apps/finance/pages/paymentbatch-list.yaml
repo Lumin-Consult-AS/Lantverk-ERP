@@ -1,0 +1,11 @@
+id: finance.paymentbatch-list
+type: list
+object: finance.paymentbatch
+title: finance.paymentbatches.title
+columns:
+  - name
+  - executionDate
+  - totalAmount
+  - paymentCount
+  - status
+  - deliveryStatus

@@ -1,0 +1,11 @@
+id: finance.banktransaction-list
+type: list
+object: finance.banktransaction
+title: finance.banktransactions.title
+columns:
+  - bookingDate
+  - amount
+  - counterpartyName
+  - paymentReference
+  - message
+  - status

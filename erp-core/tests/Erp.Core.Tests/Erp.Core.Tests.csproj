@@ -20,6 +20,7 @@
     <ProjectReference Include="..\..\..\erp-samples\demo.contacts\Demo.Contacts.App.csproj" />
     <ProjectReference Include="../../../erp-apps/finance/Finance.App.csproj" />
     <ProjectReference Include="../../../erp-apps/norway/Norway.App.csproj" />
+    <ProjectReference Include="../../../erp-apps/bank.iso20022/Bank.Iso20022.App.csproj" />
     <ProjectReference Include="../../../erp-apps/fx.norgesbank/Fx.NorgesBank.App.csproj" />
   </ItemGroup>
 

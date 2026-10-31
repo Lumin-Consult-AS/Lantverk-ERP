@@ -1,0 +1,71 @@
+id: bank.iso20022
+version: 1.0.0
+name: Bank – ISO 20022-filer
+publisher: Laftverk
+license: proprietary
+sdk: ">=1.0.0 <2.0.0"
+
+dependencies:
+  finance: ">=1.0.0 <2.0.0"
+
+# Bankadapter som bruker filer: frigitte betalingsbunter blir en betalingsfil (pain.001.001.03) som lastes ned og leveres til
+# banken, og kontoutskrifter (camt.053.001.02) og innbetalingsmeldinger (camt.054.001.02) leses inn. Adapteren har ingen
+# forbindelse til banken; filene flyttes av en person (eller av en senere adapter med direkte forbindelse).
+runtime:
+  image: ghcr.io/laftverk/bank-iso20022:1.0.0
+  resources:
+    cpu: 100m
+    memory: 128Mi
+
+enums:
+  bank.importstatus: [requested, done, failed]
+
+objects:
+  # Å opprette posten ber om at en opplastet bankfil leses inn. Last opp filen først (filtjenesten) og oppgi fil-id.
+  bank.import:
+    label: Innlesing av bankfil
+    fields:
+      file:
+        type: uuid
+        required: true
+        label: Fil
+      bankAccount:
+        type: reference
+        to: finance.bankaccount
+        required: true
+        label: Bankkonto
+      status:
+        type: enum
+        of: bank.importstatus
+        required: true
+        default: requested
+        label: Status
+      statementCount:
+        type: integer
+        label: Nye bankutskrifter
+      transactionCount:
+        type: integer
+        label: Nye transaksjoner
+      duplicateCount:
+        type: integer
+        label: Allerede innlest
+      message:
+        type: string
+        maxLength: 2000
+        label: Melding
+
+events:
+  publishes:
+    - bank.import.requested@1
+  subscribes:
+    - finance.paymentbatch.released@1: OnBatchReleased
+    - bank.import.requested@1: OnImportRequested
+
+pages:
+  - pages/import-list.yaml
+
+permissionSets:
+  - id: bank.iso20022.user
+    label: Bank – innlesing av bankfiler
+    grants:
+      bank.import: [read, create, delete]

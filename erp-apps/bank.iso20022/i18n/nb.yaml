@@ -1,0 +1,11 @@
+bank:
+  imports:
+    title: Innlesing av bankfiler
+  fields:
+    file: Fil
+    bankAccount: Bankkonto
+    status: Status
+    statementCount: Nye bankutskrifter
+    transactionCount: Nye transaksjoner
+    duplicateCount: Allerede innlest
+    message: Melding

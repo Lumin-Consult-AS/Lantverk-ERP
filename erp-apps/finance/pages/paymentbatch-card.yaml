@@ -1,0 +1,49 @@
+id: finance.paymentbatch-card
+type: card
+object: finance.paymentbatch
+title: "{name}"
+groups:
+  - label: finance.card.general
+    fields:
+      - name
+      - bankAccount
+      - executionDate
+      - dueUntil
+      - status
+  - label: finance.card.delivery
+    fields:
+      - totalAmount
+      - paymentCount
+      - deliveryStatus
+      - message
+      - file
+actions:
+  - id: submit
+    label: finance.actions.submit
+    transition: submit
+    placement: primary
+  - id: approve
+    label: finance.actions.approve
+    transition: approve
+    placement: primary
+  - id: release
+    label: finance.actions.release
+    transition: release
+    placement: primary
+  - id: reject
+    label: finance.actions.reject
+    transition: reject
+    placement: secondary
+tabs:
+  - label: finance.card.payments
+    list:
+      object: finance.payment
+      filter:
+        batch: "{id}"
+      fields:
+        - creditorName
+        - creditorAccount
+        - amount
+        - paymentReference
+        - message
+        - dueDate

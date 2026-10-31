@@ -1,0 +1,14 @@
+id: finance.bankaccount-card
+type: card
+object: finance.bankaccount
+title: "{name}"
+groups:
+  - label: finance.card.general
+    fields:
+      - name
+      - accountNumber
+      - holderName
+      - holderId
+      - bic
+      - ledgerAccount
+      - currency
