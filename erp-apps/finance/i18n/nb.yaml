@@ -1,0 +1,38 @@
+finance:
+  accounts:
+    title: Kontoplan
+  vouchers:
+    title: Bilag (kladd)
+  entries:
+    title: Bokførte bilag
+  postings:
+    title: Posteringer
+  openitems:
+    title: Reskontro – åpne poster
+  card:
+    general: Generelt
+    lines: Linjer
+    postings: Posteringer
+  actions:
+    post: Bokfør
+  fields:
+    number: Kontonummer
+    name: Navn
+    accountType: Kontotype
+    controlType: Reskontro
+    isActive: Aktiv
+    voucherDate: Bilagsdato
+    description: Tekst
+    status: Status
+    entryNumber: Bilagsnummer
+    entryDate: Bokføringsdato
+    fiscalPeriod: Periode
+    postingDate: Dato
+    entry: Bilag
+    account: Konto
+    debit: Debet
+    credit: Kredit
+    party: Part
+    dueDate: Forfallsdato
+    amount: Beløp
+    remaining: Åpent beløp

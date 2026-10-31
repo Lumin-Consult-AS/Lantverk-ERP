@@ -1,0 +1,23 @@
+id: finance.journalentry-card
+type: card
+object: finance.journalentry
+title: "{entryNumber}"
+groups:
+  - label: finance.card.general
+    fields:
+      - entryNumber
+      - entryDate
+      - description
+      - fiscalPeriod
+tabs:
+  - label: finance.card.postings
+    list:
+      object: finance.posting
+      filter:
+        entry: "{id}"
+      fields:
+        - account
+        - description
+        - debit
+        - credit
+        - party

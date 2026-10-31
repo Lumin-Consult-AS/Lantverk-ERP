@@ -1,0 +1,10 @@
+id: finance.account-list
+type: list
+object: finance.account
+title: finance.accounts.title
+columns:
+  - number
+  - name
+  - accountType
+  - controlType
+  - isActive

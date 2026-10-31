@@ -1,0 +1,11 @@
+id: finance.openitem-list
+type: list
+object: finance.openitem
+title: finance.openitems.title
+columns:
+  - party
+  - account
+  - dueDate
+  - amount
+  - remaining
+  - status

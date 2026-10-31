@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Erp.Core.Domain.Apps;
 using Erp.Core.Domain.Data;
+using Erp.Core.Infrastructure.Data;
 using Erp.Core.Domain.Tenancy;
 using Erp.Core.Infrastructure.Persistence;
 using Erp.Sdk.Contracts.V1;
@@ -41,7 +42,8 @@ public sealed class AppHostService(
     ITenantContext tenantContext,
     KubernetesAppOrchestrator orchestrator,
     IInternalTokenIssuer? tokenIssuer = null,
-    AppHostOptions? options = null)
+    AppHostOptions? options = null,
+    ActiveCallTransactionRegistry? activeTxRegistry = null)
 {
     private readonly AppHostOptions _options = options ?? new AppHostOptions();
 
@@ -107,6 +109,10 @@ public sealed class AppHostService(
             timeoutCts.CancelAfter(_options.SynchronousHookTimeout);
 
             HookResponse response;
+            // A data call that is itself running a hook waits for the app here. The app's own data calls in the same
+            // transaction would wait for the gate that call holds, so it is let go for the duration of the hook.
+            var heldGate = activeTxRegistry?.HeldGate;
+            heldGate?.Gate.Release();
             try
             {
                 response = await client.InvokeHookAsync(
@@ -127,6 +133,24 @@ public sealed class AppHostService(
             {
                 throw new RecordValidationException(
                     $"Synchronous hook '{hookType}' in app '{app.AppId}' exceeded the {_options.SynchronousHookTimeout.TotalSeconds:0.#}s deadline.");
+            }
+            catch (RpcException ex) when (ex.StatusCode is StatusCode.InvalidArgument or StatusCode.FailedPrecondition
+                                              or StatusCode.AlreadyExists or StatusCode.Aborted or StatusCode.NotFound)
+            {
+                // The app's handler was refused by the core while it worked (a data call it made was invalid): the message
+                // is the core's own and is meant for the person who caused the change.
+                throw new RecordValidationException(ex.Status.Detail, null);
+            }
+            catch (RpcException ex) when (ex.StatusCode == StatusCode.PermissionDenied)
+            {
+                throw new PermissionDeniedException(ex.Status.Detail);
+            }
+            finally
+            {
+                if (heldGate is not null)
+                {
+                    await heldGate.Gate.WaitAsync(CancellationToken.None);
+                }
             }
 
             if (!response.IsValid)

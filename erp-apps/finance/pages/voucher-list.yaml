@@ -1,0 +1,8 @@
+id: finance.voucher-list
+type: list
+object: finance.voucher
+title: finance.vouchers.title
+columns:
+  - voucherDate
+  - description
+  - status

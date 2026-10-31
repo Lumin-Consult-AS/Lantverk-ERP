@@ -37,6 +37,18 @@ public sealed class ActiveCallTransactionRegistry
         set => CurrentCorrelationIdLocal.Value = value;
     }
 
+    private static readonly AsyncLocal<ActiveCallTransactionEntry?> HeldGateLocal = new();
+
+    /// <summary>
+    /// The entry whose gate the current call holds, if it is a data call made from inside a hook. While such a call waits
+    /// for an app (a nested hook), it lets go of the gate so that the app's own data calls can run in the same transaction.
+    /// </summary>
+    public ActiveCallTransactionEntry? HeldGate
+    {
+        get => HeldGateLocal.Value;
+        set => HeldGateLocal.Value = value;
+    }
+
     public IDisposable Register(
         string correlationId,
         Guid tenantId,

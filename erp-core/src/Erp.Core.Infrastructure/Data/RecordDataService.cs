@@ -706,7 +706,11 @@ public sealed class RecordDataService(
                     statusFieldName);
             }
 
+            await InvokeTransitionHooksAsync(
+                objectDef, existing, transitionName, transition.To, statusFieldName, rowVer, correlationId, afterSave: false, cancellationToken);
             var changed = await ApplyStatusChangeAsync(conn, tx, objectDef, id, rowVer, transition.To, cancellationToken);
+            await InvokeTransitionHooksAsync(
+                objectDef, changed, transitionName, transition.To, statusFieldName, rowVer, correlationId, afterSave: true, cancellationToken);
             await PublishRecordEventAsync(
                 conn, tx, $"{objectDef.Id}.updated@1", objectDef.Id, changed.Id, changed.Fields, changed.CompanyId, correlationId, cancellationToken);
 
@@ -783,10 +787,50 @@ public sealed class RecordDataService(
                 statusFieldName);
         }
 
+        await InvokeTransitionHooksAsync(
+            objectDef, current, transitionName, transition.To, statusFieldName, current.RowVersion, correlationId, afterSave: false, cancellationToken);
         var changed = await ApplyStatusChangeAsync(conn, tx, objectDef, recordId, current.RowVersion, transition.To, cancellationToken);
+        await InvokeTransitionHooksAsync(
+            objectDef, changed, transitionName, transition.To, statusFieldName, current.RowVersion, correlationId, afterSave: true, cancellationToken);
         await PublishRecordEventAsync(
             conn, tx, $"{objectDef.Id}.updated@1", objectDef.Id, changed.Id, changed.Fields, changed.CompanyId, correlationId, cancellationToken);
         return changed;
+    }
+
+    /// <summary>
+    /// A status transition is a change of the record like any other: apps are asked to validate it (<c>OnValidate</c>,
+    /// <c>OnBeforeSave</c>, with the record as it will be) and told when it has happened (<c>OnAfterSave</c>), all inside the
+    /// transition's transaction. A hook that refuses stops the transition; the operation is <c>transition:{name}</c>.
+    /// </summary>
+    private async Task InvokeTransitionHooksAsync(
+        ObjectDefinition objectDef,
+        RecordData record,
+        string transitionName,
+        string newStatus,
+        string statusFieldName,
+        long rowVersion,
+        string correlationId,
+        bool afterSave,
+        CancellationToken cancellationToken)
+    {
+        if (appHostService is null)
+        {
+            return;
+        }
+
+        var fields = new Dictionary<string, object?>(record.Fields, StringComparer.OrdinalIgnoreCase)
+        {
+            [statusFieldName] = newStatus
+        };
+        var operation = $"transition:{transitionName}";
+        var hooks = afterSave
+            ? new[] { HookTypeProto.OnAfterSave }
+            : new[] { HookTypeProto.OnValidate, HookTypeProto.OnBeforeSave };
+        foreach (var hook in hooks)
+        {
+            await appHostService.InvokeSynchronousHooksAsync(
+                hook, objectDef.Id, operation, record.Id, afterSave ? record.RowVersion : rowVersion, fields, record.CompanyId, correlationId, cancellationToken);
+        }
     }
 
     private async Task<RecordData> ApplyStatusChangeAsync(
@@ -1644,6 +1688,22 @@ public sealed class RecordDataService(
         return $"{field.OwnerApp}.{field.Name}";
     }
 
+    /// <summary>
+    /// The database enforces immutability, business keys and references. The caller gets a readable validation error, not a
+    /// 500, for those; anything else is not translated.
+    /// </summary>
+    private static RecordValidationException? TranslateDatabaseError(Exception ex) => ex switch
+    {
+        PostgresException { SqlState: "23000" } pg when pg.MessageText.StartsWith("immutable record", StringComparison.Ordinal)
+            => new RecordValidationException(pg.MessageText, null),
+        PostgresException { SqlState: "23505" } duplicate
+            => new RecordValidationException($"A record with the same key already exists ({duplicate.ConstraintName}).", null),
+        PostgresException { SqlState: "23503" } reference
+            => new RecordValidationException(
+                $"The record refers to a record that does not exist, or is still referred to by others ({reference.ConstraintName}).", null),
+        _ => null
+    };
+
     private async Task<T> ExecuteWithConnectionAsync<T>(
         Func<DbConnection, DbTransaction?, Task<T>> action,
         CancellationToken cancellationToken,
@@ -1653,12 +1713,19 @@ public sealed class RecordDataService(
         if (enlisted is not null)
         {
             await enlisted.Gate.WaitAsync(cancellationToken);
+            var previousGate = activeTxRegistry!.HeldGate;
+            activeTxRegistry.HeldGate = enlisted;
             try
             {
                 return await action(enlisted.Connection, enlisted.Transaction);
             }
+            catch (Exception ex) when (TranslateDatabaseError(ex) is not null)
+            {
+                throw TranslateDatabaseError(ex)!;
+            }
             finally
             {
+                activeTxRegistry.HeldGate = previousGate;
                 enlisted.Gate.Release();
             }
         }
@@ -1718,24 +1785,9 @@ public sealed class RecordDataService(
                     await localTx.RollbackAsync(cancellationToken);
                 }
 
-                // The database trigger is the guarantee; the caller gets a readable error.
-                if (ex is Npgsql.PostgresException { SqlState: "23000" } pg
-                    && pg.MessageText.StartsWith("immutable record", StringComparison.Ordinal))
+                if (TranslateDatabaseError(ex) is { } readable)
                 {
-                    throw new RecordValidationException(pg.MessageText, null);
-                }
-
-                // Business keys and references are enforced by the database; the caller gets a readable error, not a 500.
-                if (ex is PostgresException { SqlState: "23505" } duplicate)
-                {
-                    throw new RecordValidationException(
-                        $"A record with the same key already exists ({duplicate.ConstraintName}).", null);
-                }
-
-                if (ex is PostgresException { SqlState: "23503" } reference)
-                {
-                    throw new RecordValidationException(
-                        $"The record refers to a record that does not exist, or is still referred to by others ({reference.ConstraintName}).", null);
+                    throw readable;
                 }
 
                 throw;
