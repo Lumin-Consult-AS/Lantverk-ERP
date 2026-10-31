@@ -26,7 +26,7 @@ enums:
   finance.side: [debit, credit]
   finance.batchstatus: [draft, pending, approved, released]
   finance.deliverystatus: [none, sent, failed]
-  finance.transactionstatus: [new, matched, ignored]
+  finance.transactionstatus: [new, review, matched, ignored]
 
 # Landsuavhengig hovedbok. Alt norsk (kontoplan, MVA, SAF-T) ligger i Norge-pakken.
 objects:
@@ -361,6 +361,10 @@ objects:
         required: true
         scale: 2
         label: Åpent beløp
+      paymentReference:
+        type: string
+        maxLength: 35
+        label: Betalingsreferanse
       status:
         type: enum
         of: finance.openitemstatus
@@ -686,16 +690,89 @@ objects:
         type: string
         maxLength: 100
         label: Ende-til-ende-id
+      suggestedOpenItem:
+        type: reference
+        to: finance.openitem
+        label: Foreslått åpen post
+      note:
+        type: string
+        maxLength: 500
+        label: Merknad fra avstemmingen
+      openItem:
+        type: reference
+        to: finance.openitem
+        label: Utlignet post
+      voucher:
+        type: reference
+        to: finance.voucher
+        label: Bilag
+      settlement:
+        type: reference
+        to: finance.settlement
+        label: Utligning
       status:
         type: enum
         of: finance.transactionstatus
         required: true
         default: new
         label: Status
+    status:
+      field: status
+      initial: new
+      transitions:
+        suggest:
+          from: new
+          to: review
+          permission: post
+        accept:
+          from: review
+          to: matched
+          permission: post
+        ignore:
+          from: review
+          to: ignored
+          permission: post
     keys:
       - name: uk_banktransaction_external
         fields: [externalId]
         scopeToCompany: true
+
+  # Avstemming av en bankkonto mot hovedboken per dato: bankens saldo (siste utskrift til og med datoen) mot saldoen på
+  # hovedbokskontoen, og det som ennå ikke er avstemt. Tallene settes av appen når posten opprettes.
+  finance.bankreconciliation:
+    label: Bankavstemming
+    fields:
+      bankAccount:
+        type: reference
+        to: finance.bankaccount
+        required: true
+        label: Bankkonto
+      asOf:
+        type: date
+        required: true
+        label: Per dato
+      bankBalance:
+        type: decimal
+        scale: 2
+        label: Saldo i banken
+      statementDate:
+        type: date
+        label: Siste utskrift til og med
+      ledgerBalance:
+        type: decimal
+        scale: 2
+        label: Saldo i hovedboken
+      difference:
+        type: decimal
+        scale: 2
+        label: Differanse
+      unmatchedCount:
+        type: integer
+        label: Transaksjoner til gjennomgang
+      unmatchedAmount:
+        type: decimal
+        scale: 2
+        label: Sum til gjennomgang
 
 # Leverandørens bankkonto, brukt som forslag når en betalingsbunt lages.
 extensions:
@@ -724,8 +801,10 @@ events:
     - finance.journal.posted@1
     - finance.settlement.completed@1
     - finance.paymentbatch.released@1
+    - finance.banktransaction.created@1
   subscribes:
     - core.fiscalyear.created@1: OnFiscalYearCreated
+    - finance.banktransaction.created@1: OnBankTransactionCreated
 
 pages:
   - pages/settings-list.yaml
@@ -743,6 +822,8 @@ pages:
   - pages/paymentbatch-card.yaml
   - pages/bankstatement-list.yaml
   - pages/banktransaction-list.yaml
+  - pages/banktransaction-card.yaml
+  - pages/bankreconciliation-list.yaml
 
 permissionSets:
   - id: finance.admin
@@ -773,6 +854,7 @@ permissionSets:
       finance.payment: [read]
       finance.bankstatement: [read]
       finance.banktransaction: [read]
+      finance.bankreconciliation: [read]
   - id: finance.bookkeeper
     label: Regnskap – bokføring
     grants:
@@ -789,4 +871,14 @@ permissionSets:
       finance.paymentbatch: [read, create, update, delete, post]
       finance.payment: [read, create, update, delete]
       finance.bankstatement: [read, create, update]
-      finance.banktransaction: [read, create, update]
+      finance.banktransaction: [read, create, update, post]
+      finance.bankreconciliation: [read, create, delete]
+
+# Det som krever en person: bankposter som avstemmingen ikke kunne avgjøre.
+attention:
+  - id: finance.banktransactions.review
+    label: Banktransaksjoner til gjennomgang
+    source: { query: finance.banktransaction, filter: { status: review } }
+    severity: action
+    audience: { permission: finance.banktransaction.post }
+    action: { page: finance.banktransaction-list }

@@ -19,13 +19,18 @@ finance:
     title: Bank statements
   banktransactions:
     title: Bank transactions
+  bankreconciliations:
+    title: Bank reconciliation
   card:
+    reconciliation: Reconciliation
     delivery: Bank
     payments: Payments
     general: General
     lines: Lines
     postings: Postings
   actions:
+    accept: Accept suggestion
+    ignore: Ignore
     submit: Submit for approval
     approve: Approve
     reject: Reject

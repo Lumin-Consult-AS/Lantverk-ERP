@@ -146,6 +146,8 @@ service DataService {
   rpc Query (DataQueryRequest) returns (DataQueryResponse);
   rpc Create (DataCreateRequest) returns (DataRecordResponse);
   rpc Update (DataUpdateRequest) returns (DataRecordResponse);
+  // Carries out a status transition (with its hooks, permission and workflow) as the calling user.
+  rpc Transition (DataTransitionRequest) returns (DataRecordResponse);
   rpc Delete (DataDeleteRequest) returns (DataDeleteResponse);
   rpc DeleteWhere (DataDeleteWhereRequest) returns (DataDeleteWhereResponse);
 }
@@ -177,6 +179,15 @@ message DataUpdateRequest {
   string record_id = 3;
   int64 row_version = 4;
   string fields_json = 5;
+}
+
+message DataTransitionRequest {
+  CallContextProto context = 1;
+  string object_id = 2;
+  string record_id = 3;
+  string transition = 4;
+  // 0 = do not check
+  int64 row_version = 5;
 }
 
 message DataDeleteRequest {

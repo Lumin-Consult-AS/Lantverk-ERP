@@ -9,3 +9,4 @@ columns:
   - paymentReference
   - message
   - status
+  - note
