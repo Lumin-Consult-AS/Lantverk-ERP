@@ -23,6 +23,8 @@ finance:
     title: Bank reconciliation
   supplierinvoices:
     title: Supplier invoices
+  salesinvoices:
+    title: Sales invoices
   card:
     source: Document
     reconciliation: Reconciliation
@@ -40,6 +42,7 @@ finance:
     release: Release to bank
     post: Post
     retry: Read again
+    send: Send invoice
     reopen: Reopen
   fields:
     number: Account number

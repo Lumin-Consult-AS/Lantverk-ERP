@@ -1,0 +1,13 @@
+id: finance.salesinvoice-list
+type: list
+object: finance.salesinvoice
+title: finance.salesinvoices.title
+columns:
+  - invoiceNumber
+  - customer
+  - invoiceDate
+  - dueDate
+  - totalAmount
+  - paymentReference
+  - status
+  - deliveryMessage

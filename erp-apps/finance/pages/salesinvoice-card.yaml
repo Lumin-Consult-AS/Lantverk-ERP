@@ -1,0 +1,48 @@
+id: finance.salesinvoice-card
+type: card
+object: finance.salesinvoice
+title: "{invoiceNumber}"
+groups:
+  - label: finance.card.general
+    fields:
+      - customer
+      - invoiceDate
+      - dueDate
+      - buyerReference
+      - paymentReference
+      - totalAmount
+      - status
+  - label: finance.card.delivery
+    fields:
+      - message
+      - deliveryReference
+      - deliveryMessage
+      - file
+      - voucher
+actions:
+  - id: post
+    label: finance.actions.post
+    transition: post
+    placement: primary
+  - id: send
+    label: finance.actions.send
+    transition: send
+    placement: primary
+  - id: retry
+    label: finance.actions.retry
+    transition: retry
+    placement: primary
+tabs:
+  - label: finance.card.lines
+    list:
+      object: finance.salesinvoiceline
+      filter:
+        invoice: "{id}"
+      fields:
+        - description
+        - quantity
+        - unitPrice
+        - amount
+        - vatRate
+        - vatAmount
+        - account

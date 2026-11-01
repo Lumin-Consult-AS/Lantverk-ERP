@@ -28,6 +28,7 @@ enums:
   finance.deliverystatus: [none, sent, failed]
   finance.transactionstatus: [new, review, matched, ignored]
   finance.invoicestatus: [received, proposed, pending, approved, posted, rejected, failed]
+  finance.salesstatus: [draft, posting, posted, sending, sent, failed]
 
 # Landsuavhengig hovedbok. Alt norsk (kontoplan, MVA, SAF-T) ligger i Norge-pakken.
 objects:
@@ -942,6 +943,158 @@ objects:
         to: core.dimensionvalue
         label: Dimensjon 3
 
+  # Utgående faktura i sin enkleste form: kunde, linjer med konto, og bokføring som gir en åpen kundepost. Salgsappen i fase 3 får
+  # ordre og priser; denne fakturaen er det regnskapet trenger for å sende og få betalt. Å sende er en egen handling; en adapter
+  # (EHF, senere e-post) svarer på hendelsen finance.salesinvoice.send.requested@1 og melder tilbake med «delivered» eller «fail».
+  finance.salesinvoice:
+    label: Utgående faktura
+    fields:
+      invoiceNumber:
+        type: string
+        maxLength: 40
+        numberSeries:
+          padding: 5
+          perYear: true
+        label: Fakturanummer
+      customer:
+        type: reference
+        to: core.party
+        required: true
+        label: Kunde
+      invoiceDate:
+        type: date
+        required: true
+        label: Fakturadato
+      dueDate:
+        type: date
+        label: Forfallsdato
+      buyerReference:
+        type: string
+        maxLength: 100
+        label: Kundens referanse
+      paymentReference:
+        type: string
+        maxLength: 35
+        label: Betalingsreferanse (KID)
+      totalAmount:
+        type: decimal
+        scale: 2
+        label: Totalt å betale
+      voucher:
+        type: reference
+        to: finance.voucher
+        label: Bilag
+      file:
+        type: uuid
+        label: Sendt dokument
+      message:
+        type: string
+        maxLength: 2000
+        label: Melding
+      deliveryReference:
+        type: string
+        maxLength: 200
+        label: Leveringsreferanse
+      deliveryMessage:
+        type: string
+        maxLength: 2000
+        label: Melding fra levering
+      status:
+        type: enum
+        of: finance.salesstatus
+        required: true
+        default: draft
+        label: Status
+    status:
+      field: status
+      initial: draft
+      transitions:
+        # Bokføringen skjer i en egen handler (hendelsen finance.salesinvoice.post.requested@1) i stedet for inne i overgangen, slik
+        # at bilaget bokføres i sin egen transaksjon. Går den bra, blir fakturaen «posted»; ellers tilbake til utkast med årsaken.
+        post:
+          from: draft
+          to: posting
+          permission: post
+        posted:
+          from: posting
+          to: posted
+          permission: post
+        unpost:
+          from: posting
+          to: draft
+          permission: post
+        send:
+          from: posted
+          to: sending
+          permission: update
+        delivered:
+          from: sending
+          to: sent
+          permission: update
+        fail:
+          from: sending
+          to: failed
+          permission: update
+        retry:
+          from: failed
+          to: sending
+          permission: update
+
+  finance.salesinvoiceline:
+    label: Fakturalinje (salg)
+    fields:
+      invoice:
+        type: reference
+        to: finance.salesinvoice
+        required: true
+        onDelete: cascade
+        label: Faktura
+      description:
+        type: string
+        required: true
+        maxLength: 500
+        label: Beskrivelse
+      quantity:
+        type: decimal
+        required: true
+        scale: 4
+        default: 1
+        label: Antall
+      unitPrice:
+        type: decimal
+        required: true
+        scale: 2
+        label: Pris per enhet
+      amount:
+        type: decimal
+        scale: 2
+        label: Beløp uten skatt og avgift
+      vatRate:
+        type: decimal
+        scale: 2
+        label: Sats for skatt og avgift (%)
+      vatAmount:
+        type: decimal
+        scale: 2
+        label: Skatt og avgift
+      account:
+        type: reference
+        to: finance.account
+        required: true
+        label: Inntektskonto
+      dimension1:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 1
+      dimension2:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 2
+      dimension3:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 3
+
 # Leverandørens bankkonto, brukt som forslag når en betalingsbunt lages.
 extensions:
   core.party:
@@ -983,10 +1136,13 @@ events:
     - finance.paymentbatch.released@1
     - finance.banktransaction.created@1
     - finance.supplierinvoice.requested@1
+    - finance.salesinvoice.send.requested@1
+    - finance.salesinvoice.post.requested@1
   subscribes:
     - core.fiscalyear.created@1: OnFiscalYearCreated
     - finance.banktransaction.created@1: OnBankTransactionCreated
     - core.inbox.received@1: OnInboxReceived
+    - finance.salesinvoice.post.requested@1: OnSalesInvoicePostRequested
 
 pages:
   - pages/settings-list.yaml
@@ -1008,6 +1164,8 @@ pages:
   - pages/bankreconciliation-list.yaml
   - pages/supplierinvoice-list.yaml
   - pages/supplierinvoice-card.yaml
+  - pages/salesinvoice-list.yaml
+  - pages/salesinvoice-card.yaml
 
 permissionSets:
   - id: finance.admin
@@ -1043,6 +1201,8 @@ permissionSets:
       finance.bankreconciliation: [read]
       finance.supplierinvoice: [read]
       finance.supplierinvoiceline: [read]
+      finance.salesinvoice: [read]
+      finance.salesinvoiceline: [read]
   - id: finance.bookkeeper
     label: Regnskap – bokføring
     grants:
@@ -1063,6 +1223,8 @@ permissionSets:
       finance.bankreconciliation: [read, create, delete]
       finance.supplierinvoice: [read, create, update, delete, post]
       finance.supplierinvoiceline: [read, create, update, delete]
+      finance.salesinvoice: [read, create, update, delete, post]
+      finance.salesinvoiceline: [read, create, update, delete]
 
 # Det som krever en person: bankposter som avstemmingen ikke kunne avgjøre.
 attention:

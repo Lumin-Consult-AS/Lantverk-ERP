@@ -36,6 +36,8 @@ public sealed class NorwayApp : AppBase
     private const string Payment = "finance.payment";
     private const string Invoice = "finance.supplierinvoice";
     private const string InvoiceLine = "finance.supplierinvoiceline";
+    private const string SalesInvoice = "finance.salesinvoice";
+    private const string SalesLine = "finance.salesinvoiceline";
 
     // The domestic input VAT codes a supplier invoice is coded with, by rate (the code names say which is which)
     private static readonly string[] InputDeductionCodes = ["1", "11", "12", "13"];
@@ -497,6 +499,53 @@ public sealed class NorwayApp : AppBase
         }
 
         return ValidationResult.Error("paymentReference", $"{reference} er ikke en gyldig KID (2–25 siffer med riktig kontrollsiffer). Rett den etter fakturaen, eller tøm feltet.");
+    }
+
+    // ------------------------------------------------------------------ outgoing invoices
+
+    /// <summary>A sales line takes an output VAT code.</summary>
+    [OnValidate(SalesLine)]
+    public async Task<ValidationResult> ValidateSalesLine(Record line, Erp.Sdk.AppContext ctx)
+    {
+        if (line.Get<Guid?>(LineVatCode) is not { } codeId)
+        {
+            return ValidationResult.Ok;
+        }
+
+        return await ctx.Data.GetAsync(VatCode, codeId) is { } code && code.Get<string>("direction") != "output"
+            ? ValidationResult.Error(LineVatCode, $"MVA-kode {code.Get<string>("code")} gjelder inngående MVA. Velg en kode for utgående MVA.")
+            : ValidationResult.Ok;
+    }
+
+    /// <summary>
+    /// Puts the rate and the VAT amount on a sales line (net amount × the rate on the invoice date, rounded like the VAT line of the
+    /// voucher it becomes), so the invoice can be added up and sent before it is posted.
+    /// </summary>
+    [OnAfterSave(SalesLine)]
+    public async Task AfterSalesLineSaved(Record changed, Erp.Sdk.AppContext ctx)
+    {
+        var line = await ctx.Data.GetAsync(SalesLine, changed.Id);
+        if (line is null)
+        {
+            return;
+        }
+
+        decimal? rate = null, vat = null;
+        if (line.Get<Guid?>(LineVatCode) is { } codeId
+            && await ctx.Data.GetAsync(SalesInvoice, line.Get<Guid>("invoice")) is { } invoice)
+        {
+            var resolved = await ResolveAsync(ctx, codeId, invoice.Get<DateOnly?>("invoiceDate") ?? ctx.Today);
+            if (resolved.Rate is { } found)
+            {
+                rate = found;
+                vat = Math.Round(line.Get<decimal>("amount") * found / 100m, 2, MidpointRounding.AwayFromZero);
+            }
+        }
+
+        if (line.Get<decimal?>("vatRate") != rate || line.Get<decimal?>("vatAmount") != vat)
+        {
+            await ctx.Data.UpdateAsync(SalesLine, line.Id, line.RowVersion, new Dictionary<string, object?> { ["vatRate"] = rate, ["vatAmount"] = vat });
+        }
     }
 
     // ------------------------------------------------------------------ SAF-T export
