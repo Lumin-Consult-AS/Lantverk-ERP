@@ -132,6 +132,16 @@ public sealed class VatMeldingTests(PostgresDatabaseFixture fixture)
             Assert.Equal(HttpStatusCode.OK, set.StatusCode);
         }
 
+        // The rule for the format of an organisation number is the Norway package's
+        using (var bad = await c.PostAsJsonAsync(Url("core.party"), new Dictionary<string, object?>
+               {
+                   ["partyNumber"] = "X-1", ["name"] = "Feil AS", ["partyType"] = "organization", ["role"] = "customer", ["organizationNumber"] = "12345"
+               }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+            Assert.Contains("ni sifre", await bad.Content.ReadAsStringAsync());
+        }
+
         var customer = await CreateAsync(c, "core.party", new Dictionary<string, object?>
         {
             ["partyNumber"] = "K-1", ["name"] = "Kunde AS", ["partyType"] = "organization", ["role"] = "customer", ["organizationNumber"] = "955777888"

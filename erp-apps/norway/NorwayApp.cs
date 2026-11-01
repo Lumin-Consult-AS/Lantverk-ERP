@@ -506,6 +506,15 @@ public sealed class NorwayApp : AppBase
         return ValidationResult.Error("paymentReference", $"{reference} er ikke en gyldig KID (2–25 siffer med riktig kontrollsiffer). Rett den etter fakturaen, eller tøm feltet.");
     }
 
+    // ------------------------------------------------------------------ parties
+
+    /// <summary>A Norwegian organisation number is nine digits. The generic parties app only holds the identifier; the rule is ours.</summary>
+    [OnValidate("core.party")]
+    public ValidationResult ValidatePartyOrganizationNumber(Record party, Erp.Sdk.AppContext ctx) =>
+        party.Get<string>("organizationNumber") is { Length: > 0 } number && (number.Length != 9 || !number.All(char.IsAsciiDigit))
+            ? ValidationResult.Error("organizationNumber", "Organisasjonsnummer må være ni sifre.")
+            : ValidationResult.Ok;
+
     // ------------------------------------------------------------------ outgoing invoices
 
     /// <summary>A sales line takes an output VAT code.</summary>

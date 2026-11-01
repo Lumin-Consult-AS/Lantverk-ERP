@@ -1,5 +1,5 @@
 id: core.parties
-version: 1.0.0
+version: 1.0.1
 name: Parter
 publisher: Laftverk
 license: proprietary
@@ -40,7 +40,6 @@ objects:
       organizationNumber:
         type: string
         maxLength: 20
-        pattern: "^[0-9]{9}$"
         requiredWhen:
           field: partyType
           eq: organization
