@@ -1,0 +1,27 @@
+id: invoice.claude
+version: 1.0.0
+name: Fakturatolk – Claude (EU)
+publisher: Laftverk
+license: proprietary
+sdk: ">=1.0.0 <2.0.0"
+
+dependencies:
+  finance: ">=1.0.0 <2.0.0"
+
+# Fakturatolk som bruker Claude i en EU-region (Amazon Bedrock, Frankfurt). Dokumentet sendes til EU-regionen og ingen andre
+# steder; leverandørens vilkår (ingen trening på kundedata) er avtalt i databehandleravtalen, ikke i koden.
+#
+# Appen er én av flere mulige tolker. Kontrakten er hendelsen finance.supplierinvoice.requested@1 og feltene på
+# finance.supplierinvoice og finance.supplierinvoiceline (ADR-0030). En annen tolk (Mindee, for eksempel) er en annen app som
+# svarer på den samme hendelsen; ingenting i finance endres. Installeres flere, tolker den som kommer først.
+runtime:
+  image: ghcr.io/laftverk/invoice-claude:1.0.0
+  resources:
+    cpu: 100m
+    memory: 192Mi
+  egress:
+    - bedrock-runtime.eu-central-1.amazonaws.com:443
+
+events:
+  subscribes:
+    - finance.supplierinvoice.requested@1: OnInvoiceRequested

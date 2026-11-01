@@ -21,7 +21,10 @@ finance:
     title: Bank transactions
   bankreconciliations:
     title: Bank reconciliation
+  supplierinvoices:
+    title: Supplier invoices
   card:
+    source: Document
     reconciliation: Reconciliation
     delivery: Bank
     payments: Payments
@@ -36,6 +39,8 @@ finance:
     reject: Reject
     release: Release to bank
     post: Post
+    retry: Read again
+    reopen: Reopen
   fields:
     number: Account number
     name: Name

@@ -27,6 +27,7 @@ enums:
   finance.batchstatus: [draft, pending, approved, released]
   finance.deliverystatus: [none, sent, failed]
   finance.transactionstatus: [new, review, matched, ignored]
+  finance.invoicestatus: [received, proposed, pending, approved, posted, rejected, failed]
 
 # Landsuavhengig hovedbok. Alt norsk (kontoplan, MVA, SAF-T) ligger i Norge-pakken.
 objects:
@@ -774,6 +775,173 @@ objects:
         scale: 2
         label: Sum til gjennomgang
 
+  # Leverandørfaktura som skal bli et bilag. Opprettes fra en fil i innboksen (eller for hånd med en fil), tolkes av en
+  # tolke-app (kontrakten er hendelsen finance.supplierinvoice.requested@1 og feltene her), får forslag til part og
+  # kontering, godkjennes i en flyt, og bokføres først når en person gjør det.
+  finance.supplierinvoice:
+    label: Leverandørfaktura
+    fields:
+      file:
+        type: uuid
+        required: true
+        label: Originaldokument
+      inboxItem:
+        type: uuid
+        label: Innboksmelding
+      supplier:
+        type: reference
+        to: core.party
+        label: Leverandør
+      supplierName:
+        type: string
+        maxLength: 200
+        label: Leverandørnavn (fra dokumentet)
+      supplierOrgNumber:
+        type: string
+        maxLength: 20
+        label: Organisasjonsnummer (fra dokumentet)
+      invoiceNumber:
+        type: string
+        maxLength: 50
+        label: Fakturanummer
+      invoiceDate:
+        type: date
+        label: Fakturadato
+      dueDate:
+        type: date
+        label: Forfallsdato
+      currency:
+        type: string
+        maxLength: 3
+        pattern: "^[A-Z]{3}$"
+        label: Valuta
+      totalAmount:
+        type: decimal
+        scale: 2
+        label: Totalbeløp (å betale)
+      vatAmount:
+        type: decimal
+        scale: 2
+        label: Herav skatt og avgift
+      paymentReference:
+        type: string
+        maxLength: 25
+        label: Betalingsreferanse (KID)
+      bankAccount:
+        type: string
+        maxLength: 34
+        label: Leverandørens bankkonto
+      extractor:
+        type: string
+        maxLength: 100
+        label: Tolket av
+      message:
+        type: string
+        maxLength: 2000
+        label: Melding
+      voucher:
+        type: reference
+        to: finance.voucher
+        label: Bilag
+      status:
+        type: enum
+        of: finance.invoicestatus
+        required: true
+        default: received
+        label: Status
+    status:
+      field: status
+      initial: received
+      transitions:
+        # Tolken er ferdig: fakturaen er klar til gjennomgang
+        propose:
+          from: received
+          to: proposed
+          permission: update
+        # Tolken klarte det ikke; årsaken står i meldingen
+        fail:
+          from: received
+          to: failed
+          permission: update
+        retry:
+          from: failed
+          to: received
+          permission: update
+        submit:
+          from: proposed
+          to: pending
+          permission: update
+          workflow: finance.supplierinvoice.approval
+          locksRecord: true
+        approve:
+          from: pending
+          to: approved
+          permission: approve
+        reject:
+          from: pending
+          to: rejected
+          permission: approve
+        reopen:
+          from: rejected
+          to: proposed
+          permission: update
+        # Bokføring er en egen, bevisst handling etter godkjenning, aldri automatisk
+        post:
+          from: approved
+          to: posted
+          permission: post
+    keys:
+      - name: uk_supplierinvoice_file
+        fields: [file]
+        scopeToCompany: true
+
+  finance.supplierinvoiceline:
+    label: Fakturalinje
+    fields:
+      invoice:
+        type: reference
+        to: finance.supplierinvoice
+        required: true
+        onDelete: cascade
+        label: Faktura
+      description:
+        type: string
+        maxLength: 500
+        label: Beskrivelse
+      amount:
+        type: decimal
+        required: true
+        scale: 2
+        label: Beløp uten skatt og avgift
+      vatRate:
+        type: decimal
+        scale: 2
+        label: Sats for skatt og avgift (%) i dokumentet
+      vatAmount:
+        type: decimal
+        scale: 2
+        label: Skatt og avgift i dokumentet
+      account:
+        type: reference
+        to: finance.account
+        label: Konto
+      suggestedAccount:
+        type: reference
+        to: finance.account
+        label: Foreslått konto
+      dimension1:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 1
+      dimension2:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 2
+      dimension3:
+        type: reference
+        to: core.dimensionvalue
+        label: Dimensjon 3
+
 # Leverandørens bankkonto, brukt som forslag når en betalingsbunt lages.
 extensions:
   core.party:
@@ -796,15 +964,29 @@ workflows:
         assignee: { role: finance.approver }
         when: { field: totalAmount, gt: 0 }
 
+  - id: finance.supplierinvoice.approval
+    object: finance.supplierinvoice
+    trigger: submit
+    mode: sequential
+    delegation: allowed
+    onComplete: approve
+    onReject: reject
+    steps:
+      - name: Godkjenn faktura
+        assignee: { role: finance.approver }
+        when: { field: totalAmount, gt: 0 }
+
 events:
   publishes:
     - finance.journal.posted@1
     - finance.settlement.completed@1
     - finance.paymentbatch.released@1
     - finance.banktransaction.created@1
+    - finance.supplierinvoice.requested@1
   subscribes:
     - core.fiscalyear.created@1: OnFiscalYearCreated
     - finance.banktransaction.created@1: OnBankTransactionCreated
+    - core.inbox.received@1: OnInboxReceived
 
 pages:
   - pages/settings-list.yaml
@@ -824,6 +1006,8 @@ pages:
   - pages/banktransaction-list.yaml
   - pages/banktransaction-card.yaml
   - pages/bankreconciliation-list.yaml
+  - pages/supplierinvoice-list.yaml
+  - pages/supplierinvoice-card.yaml
 
 permissionSets:
   - id: finance.admin
@@ -837,6 +1021,8 @@ permissionSets:
       finance.paymentbatch: [read, approve]
       finance.payment: [read]
       finance.bankaccount: [read]
+      finance.supplierinvoice: [read, approve]
+      finance.supplierinvoiceline: [read]
   - id: finance.reader
     label: Regnskap – lesetilgang
     grants:
@@ -855,6 +1041,8 @@ permissionSets:
       finance.bankstatement: [read]
       finance.banktransaction: [read]
       finance.bankreconciliation: [read]
+      finance.supplierinvoice: [read]
+      finance.supplierinvoiceline: [read]
   - id: finance.bookkeeper
     label: Regnskap – bokføring
     grants:
@@ -873,6 +1061,8 @@ permissionSets:
       finance.bankstatement: [read, create, update]
       finance.banktransaction: [read, create, update, post]
       finance.bankreconciliation: [read, create, delete]
+      finance.supplierinvoice: [read, create, update, delete, post]
+      finance.supplierinvoiceline: [read, create, update, delete]
 
 # Det som krever en person: bankposter som avstemmingen ikke kunne avgjøre.
 attention:
@@ -882,3 +1072,15 @@ attention:
     severity: action
     audience: { permission: finance.banktransaction.post }
     action: { page: finance.banktransaction-list }
+  - id: finance.supplierinvoices.review
+    label: Leverandørfakturaer til gjennomgang
+    source: { query: finance.supplierinvoice, filter: { status: proposed } }
+    severity: action
+    audience: { permission: finance.supplierinvoice.post }
+    action: { page: finance.supplierinvoice-list }
+  - id: finance.supplierinvoices.failed
+    label: Fakturaer som ikke kunne tolkes
+    source: { query: finance.supplierinvoice, filter: { status: failed } }
+    severity: action
+    audience: { permission: finance.supplierinvoice.post }
+    action: { page: finance.supplierinvoice-list }

@@ -1,0 +1,14 @@
+id: finance.supplierinvoice-list
+type: list
+object: finance.supplierinvoice
+title: finance.supplierinvoices.title
+columns:
+  - supplierName
+  - supplier
+  - invoiceNumber
+  - invoiceDate
+  - dueDate
+  - totalAmount
+  - currency
+  - status
+  - message
