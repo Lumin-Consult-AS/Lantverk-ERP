@@ -59,7 +59,7 @@ public sealed class AppInstallationTests(PostgresDatabaseFixture fixture)
             using var appsDoc = JsonDocument.Parse(await appsRes.Content.ReadAsStringAsync());
             var installedApp = Assert.Single(appsDoc.RootElement.EnumerateArray());
             Assert.Equal("core.parties", installedApp.GetProperty("appId").GetString());
-            Assert.Equal("1.0.0", installedApp.GetProperty("version").GetString());
+            Assert.Equal("1.0.1", installedApp.GetProperty("version").GetString());
             Assert.True(installedApp.GetProperty("isDeclarative").GetBoolean());
 
             using var pagesRes = await client.GetAsync("/api/v1/metadata/pages");
@@ -89,18 +89,7 @@ public sealed class AppInstallationTests(PostgresDatabaseFixture fixture)
                 });
             Assert.Equal(HttpStatusCode.BadRequest, missingOrgNoRes.StatusCode);
 
-            // 5b. Organization party with invalid organizationNumber pattern (not 9 digits) must be rejected
-            using var invalidOrgNoRes = await client.PostAsJsonAsync(
-                $"/api/v1/{companyId}/core.party",
-                new Dictionary<string, object?>
-                {
-                    ["partyNumber"] = "K-1002",
-                    ["name"] = "Ugyldig OrgNr AS",
-                    ["partyType"] = "organization",
-                    ["role"] = "customer",
-                    ["organizationNumber"] = "12345"
-                });
-            Assert.Equal(HttpStatusCode.BadRequest, invalidOrgNoRes.StatusCode);
+            // 5b. The format of the organisation number is Norwegian, so it is checked by the Norway package, not here (see VatMeldingTests)
 
             // 5c. Organization party WITH valid 9-digit organizationNumber succeeds (201 Created)
             using var validOrgRes = await client.PostAsJsonAsync(

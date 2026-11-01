@@ -587,6 +587,57 @@ public sealed class NorwayTests(PostgresDatabaseFixture fixture)
         Assert.Empty(hits);
     }
 
+    /// <summary>
+    /// Porten, punkt 6: the core, the SDK, the generic apps and the general ledger hold no Norwegian rules, codes, formats or
+    /// authorities. Comments, translations, migrations and the demo tenant's seed data are not code. The apps that connect to a
+    /// Norwegian service (the central bank's rates, PEPPOL, the ISO 20022 bank files, the invoice reader) are adapters in their own
+    /// right and are not part of this check.
+    /// </summary>
+    [Fact]
+    public void NothingNorwegian_IsInTheCore_TheSdk_TheGenericApps_OrTheLedger()
+    {
+        var dir = new DirectoryInfo(System.AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "erp-apps", "finance")))
+        {
+            dir = dir.Parent;
+        }
+
+        Assert.NotNull(dir);
+        var root = dir!.FullName;
+        var scanned = new[]
+        {
+            "erp-core/src", "erp-sdk/src", "erp-sdk/protos", "erp-apps/core.parties", "erp-apps/core.organization", "erp-apps/core.currencies",
+            "erp-apps/core.dimensions", "erp-apps/core.items", "erp-apps/finance"
+        };
+        var forbidden = new System.Text.RegularExpressions.Regex(
+            @"\b(MVA|SAF-?T|NS ?4102|Skatteetaten|Altinn|PEPPOL|EHF|KID|norway|norsk|NOK)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        var separator = Path.DirectorySeparatorChar;
+        var hits = new List<string>();
+        var scannedFiles = 0;
+        foreach (var folder in scanned)
+        {
+            foreach (var file in Directory.EnumerateFiles(Path.Combine(root, folder), "*.*", SearchOption.AllDirectories)
+                         .Where(f => Path.GetExtension(f) is ".cs" or ".yaml" or ".proto" or ".csv")
+                         .Where(f => !f.Contains($"{separator}bin{separator}") && !f.Contains($"{separator}obj{separator}")
+                                     && !f.Contains($"{separator}Migrations{separator}") && !f.Contains($"{separator}i18n{separator}")
+                                     && Path.GetFileName(f) != "DemoTenantSeeder.cs"))
+            {
+                scannedFiles++;
+                foreach (var (text, number) in File.ReadLines(file).Select((l, i) => (l.Trim(), i + 1)))
+                {
+                    if (!text.StartsWith("//") && !text.StartsWith('#') && !text.StartsWith('*') && forbidden.IsMatch(text))
+                    {
+                        hits.Add($"{Path.GetRelativePath(root, file)}:{number}: {text}");
+                    }
+                }
+            }
+        }
+
+        Assert.True(scannedFiles > 100, $"only {scannedFiles} files were scanned");
+        Assert.Empty(hits);
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private sealed class Accounts : Dictionary<string, JsonElement>

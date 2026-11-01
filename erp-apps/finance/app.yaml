@@ -827,7 +827,7 @@ objects:
       paymentReference:
         type: string
         maxLength: 25
-        label: Betalingsreferanse (KID)
+        label: Betalingsreferanse
       bankAccount:
         type: string
         maxLength: 34
@@ -975,7 +975,7 @@ objects:
       paymentReference:
         type: string
         maxLength: 35
-        label: Betalingsreferanse (KID)
+        label: Betalingsreferanse
       totalAmount:
         type: decimal
         scale: 2
