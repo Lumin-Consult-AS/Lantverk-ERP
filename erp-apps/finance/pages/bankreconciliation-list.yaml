@@ -1,0 +1,12 @@
+id: finance.bankreconciliation-list
+type: list
+object: finance.bankreconciliation
+title: finance.bankreconciliations.title
+columns:
+  - bankAccount
+  - asOf
+  - bankBalance
+  - ledgerBalance
+  - difference
+  - unmatchedCount
+  - unmatchedAmount

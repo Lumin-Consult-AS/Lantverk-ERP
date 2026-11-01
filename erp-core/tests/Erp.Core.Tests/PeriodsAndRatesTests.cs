@@ -81,7 +81,7 @@ public sealed class PeriodsAndRatesTests(PostgresDatabaseFixture fixture)
         }
         finally
         {
-            await client.DeleteAsync("/api/v1/apps/core.organization");
+            await client.DeleteAsync("/api/v1/apps/core.organization?purge=true");
         }
     }
 
@@ -121,7 +121,7 @@ public sealed class PeriodsAndRatesTests(PostgresDatabaseFixture fixture)
         }
         finally
         {
-            await client.DeleteAsync("/api/v1/apps/core.currencies");
+            await client.DeleteAsync("/api/v1/apps/core.currencies?purge=true");
         }
     }
 

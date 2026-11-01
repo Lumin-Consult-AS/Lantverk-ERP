@@ -263,6 +263,30 @@ objects:
         scale: 2
         label: Avgift
 
+  # KID for kundeposter: hver åpne kundepost (faktura) får en KID som kunden oppgir ved betaling. Tallet er et hullfritt løpenummer
+  # med MOD10-kontrollsiffer; den ferdige KID-en settes som betalingsreferanse på den åpne posten.
+  norway.kid:
+    label: KID
+    fields:
+      openItem:
+        type: uuid
+        required: true
+        label: Åpen post
+      number:
+        type: string
+        maxLength: 20
+        numberSeries:
+          padding: 9
+        label: Løpenummer
+      kid:
+        type: string
+        maxLength: 25
+        label: KID
+    keys:
+      - name: uk_kid_openitem
+        fields: [openItem]
+        scopeToCompany: true
+
   # Eksport av SAF-T Regnskap for en periode. Å opprette posten ber om eksporten; den lages i bakgrunnen, sjekkes mot
   # Skatteetatens skjema og lagres som en fil som kan lastes ned (id i feltet «Fil»).
   norway.saftexport:
@@ -349,6 +373,7 @@ permissionSets:
       norway.vatcode: [read, create, update, delete]
       norway.vatrate: [read, create, update, delete]
       norway.saftexport: [read, create, delete]
+      norway.kid: [read]
   - id: norway.reader
     label: Norge-pakken – lesetilgang
     grants:
@@ -359,6 +384,7 @@ permissionSets:
       norway.vatreturn: [read]
       norway.vatreturnline: [read]
       norway.saftexport: [read]
+      norway.kid: [read]
   - id: norway.bookkeeper
     label: Norge-pakken – MVA
     grants:
@@ -369,3 +395,4 @@ permissionSets:
       norway.vatreturn: [read, create, update, delete, post]
       norway.vatreturnline: [read, create, update, delete]
       norway.saftexport: [read, create, delete]
+      norway.kid: [read, create, update]

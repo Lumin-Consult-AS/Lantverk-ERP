@@ -19,13 +19,18 @@ finance:
     title: Bankutskrifter
   banktransactions:
     title: Banktransaksjoner
+  bankreconciliations:
+    title: Bankavstemming
   card:
+    reconciliation: Avstemming
     delivery: Bank
     payments: Betalinger
     general: Generelt
     lines: Linjer
     postings: Posteringer
   actions:
+    accept: Godkjenn forslag
+    ignore: Ignorer
     submit: Send til godkjenning
     approve: Godkjenn
     reject: Avvis

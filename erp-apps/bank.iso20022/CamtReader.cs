@@ -72,7 +72,7 @@ public static class CamtReader
                 }
 
                 var amountElement = ntry.Child("Amt") ?? throw new BankFileException("En post mangler beløp.");
-                var amount = decimal.Parse(amountElement.Value, CultureInfo.InvariantCulture);
+                var amount = Amount(amountElement.Value);
                 var credit = ntry.Child("CdtDbtInd")?.Value == "CRDT";
                 var detail = ntry.Child("NtryDtls")?.Child("TxDtls");
                 var refs = detail?.Child("Refs");
@@ -99,7 +99,7 @@ public static class CamtReader
                 var bal = balances.FirstOrDefault(b => codes.Contains(b.Child("Tp")?.Child("CdOrPrtry")?.Child("Cd")?.Value));
                 return bal is null
                     ? null
-                    : decimal.Parse(bal.Child("Amt")!.Value, CultureInfo.InvariantCulture) * (bal.Child("CdtDbtInd")?.Value == "DBIT" ? -1 : 1);
+                    : Amount(bal.Child("Amt")!.Value) * (bal.Child("CdtDbtInd")?.Value == "DBIT" ? -1 : 1);
             }
 
             var period = stmt.Child("FrToDt");
@@ -116,6 +116,12 @@ public static class CamtReader
 
         return result;
     }
+
+    /// <summary>ISO 20022 amounts use a decimal point and no thousands separator; anything else is refused rather than misread.</summary>
+    private static decimal Amount(string text) =>
+        decimal.TryParse(text, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : throw new BankFileException($"Ugyldig beløp i filen: «{text}».");
 
     private static string? Account(XElement? acct)
     {

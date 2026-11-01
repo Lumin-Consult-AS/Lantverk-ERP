@@ -190,6 +190,42 @@ public sealed class CoreDataGrpcService(
         }
     }
 
+    public override async Task<DataRecordResponse> Transition(DataTransitionRequest request, ServerCallContext context)
+    {
+        using var scope = GrpcCallContextHelper.AuthenticateAndBeginScope(
+            request.Context,
+            context,
+            tokenIssuer,
+            tenantContext,
+            txRegistry,
+            out var companyId);
+
+        if (!Guid.TryParse(request.RecordId, out var recordId))
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid record_id UUID."));
+        }
+
+        try
+        {
+            var changed = await recordDataService.TransitionStatusAsync(
+                request.ObjectId,
+                recordId,
+                request.Transition,
+                request.RowVersion == 0 ? null : request.RowVersion,
+                companyId,
+                context.CancellationToken);
+            return new DataRecordResponse { Found = true, Record = GrpcCallContextHelper.ToProto(changed) };
+        }
+        catch (RecordValidationException ex)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        }
+        catch (ConcurrencyConflictException ex)
+        {
+            throw new RpcException(new Status(StatusCode.Aborted, ex.Message));
+        }
+    }
+
     public override async Task<DataRecordResponse> Update(DataUpdateRequest request, ServerCallContext context)
     {
         using var scope = GrpcCallContextHelper.AuthenticateAndBeginScope(
