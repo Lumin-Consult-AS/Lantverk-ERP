@@ -1,5 +1,6 @@
 @inject ErpApiClient Api
 @inject I18nService I18n
+@inject RegionService Region
 @inject NavigationManager Nav
 
 <MudPaper Elevation="2" Class="pa-4" data-page-id="@Page.Id" data-page-type="list">
@@ -275,17 +276,21 @@
         return I18n.T($"parties.fields.{shortName}", I18n.T(fallback, fallback));
     }
 
-    private static string FormatCellValue(ClientRecordData record, string columnKey)
+    private string FormatCellValue(ClientRecordData record, string columnKey)
     {
+        var field = ObjectDefinition.Fields.FirstOrDefault(f =>
+            string.Equals(f.Name, columnKey, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(f.GetExposedName(ObjectDefinition.OwnerApp), columnKey, StringComparison.OrdinalIgnoreCase));
+
         if (record.Fields.TryGetValue(columnKey, out var val) && val is not null)
         {
-            return I18nService.UnwrapDisplayString(val);
+            return Region.Display(field, val);
         }
 
         var shortKey = columnKey.Contains('.') ? columnKey[(columnKey.LastIndexOf('.') + 1)..] : columnKey;
         if (record.Fields.TryGetValue(shortKey, out var val2) && val2 is not null)
         {
-            return I18nService.UnwrapDisplayString(val2);
+            return Region.Display(field, val2);
         }
 
         return string.Empty;

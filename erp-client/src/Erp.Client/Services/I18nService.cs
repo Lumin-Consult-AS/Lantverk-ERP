@@ -8,7 +8,7 @@ namespace Erp.Client.Services;
 /// Provides client-side localization (<c>nb</c> and <c>en</c>) combining built-in platform
 /// strings with application-supplied <c>i18n/</c> dictionaries fetched over REST.
 /// </summary>
-public sealed class I18nService
+public sealed class I18nService(RegionService? region = null)
 {
     private static readonly Regex PlaceholderRegex = new(
         @"\{(?<key>[a-zA-Z0-9_\.]+)\}",
@@ -141,7 +141,23 @@ public sealed class I18nService
             ["ui.validation.min"] = "Feltet '{0}' må være minst {1}.",
             ["ui.validation.max"] = "Feltet '{0}' kan maks være {1}.",
             ["ui.validation.pattern"] = "Feltet '{0}' har ugyldig format (krav: {1}).",
-            ["ui.validation.readOnly"] = "Feltet '{0}' er skrivebeskyttet."
+            ["ui.validation.readOnly"] = "Feltet '{0}' er skrivebeskyttet.",
+            ["ui.validation.date"] = "Feltet '{0}' er ikke en gyldig dato. Skriv for eksempel 31.12.2026.",
+            ["ui.validation.number"] = "Feltet '{0}' er ikke et gyldig tall. Skriv for eksempel 1 234,56.",
+            ["ui.nav.settings"] = "Innstillinger",
+            ["ui.settings.title"] = "Innstillinger",
+            ["ui.settings.mine"] = "Mine innstillinger",
+            ["ui.settings.language"] = "Språk",
+            ["ui.settings.region"] = "Region (dato og tall)",
+            ["ui.settings.useDefault"] = "Bruk virksomhetens standard ({0})",
+            ["ui.settings.example"] = "Eksempel: dato {0}, beløp {1}",
+            ["ui.settings.tenant"] = "Standard for virksomheten (nye brukere og de som ikke har valgt)",
+            ["ui.settings.defaultLanguage"] = "Standardspråk",
+            ["ui.settings.defaultRegion"] = "Standardregion",
+            ["ui.settings.saved"] = "Innstillingene er lagret.",
+            ["ui.settings.failed"] = "Innstillingene kunne ikke lagres.",
+            ["ui.settings.lang.nb"] = "Norsk (bokmål)",
+            ["ui.settings.lang.en"] = "English"
         },
         ["en"] = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -268,7 +284,23 @@ public sealed class I18nService
             ["ui.validation.min"] = "Field '{0}' must be at least {1}.",
             ["ui.validation.max"] = "Field '{0}' must be at most {1}.",
             ["ui.validation.pattern"] = "Field '{0}' does not match required format ({1}).",
-            ["ui.validation.readOnly"] = "Field '{0}' is read-only."
+            ["ui.validation.readOnly"] = "Field '{0}' is read-only.",
+            ["ui.validation.date"] = "Field '{0}' is not a valid date. Write for example 31.12.2026.",
+            ["ui.validation.number"] = "Field '{0}' is not a valid number. Write for example 1,234.56.",
+            ["ui.nav.settings"] = "Settings",
+            ["ui.settings.title"] = "Settings",
+            ["ui.settings.mine"] = "My settings",
+            ["ui.settings.language"] = "Language",
+            ["ui.settings.region"] = "Region (dates and numbers)",
+            ["ui.settings.useDefault"] = "Use the organisation's default ({0})",
+            ["ui.settings.example"] = "Example: date {0}, amount {1}",
+            ["ui.settings.tenant"] = "Organisation default (new users and those who have not chosen)",
+            ["ui.settings.defaultLanguage"] = "Default language",
+            ["ui.settings.defaultRegion"] = "Default region",
+            ["ui.settings.saved"] = "Settings saved.",
+            ["ui.settings.failed"] = "The settings could not be saved.",
+            ["ui.settings.lang.nb"] = "Norsk (bokmål)",
+            ["ui.settings.lang.en"] = "English"
         }
     };
 
@@ -341,13 +373,13 @@ public sealed class I18nService
             var fieldKey = match.Groups["key"].Value;
             if (fields.TryGetValue(fieldKey, out var val) && val is not null)
             {
-                return UnwrapDisplayString(val);
+                return region?.Display(null, val) ?? UnwrapDisplayString(val);
             }
 
             var shortKey = fieldKey.Contains('.') ? fieldKey[(fieldKey.LastIndexOf('.') + 1)..] : fieldKey;
             if (fields.TryGetValue(shortKey, out var val2) && val2 is not null)
             {
-                return UnwrapDisplayString(val2);
+                return region?.Display(null, val2) ?? UnwrapDisplayString(val2);
             }
 
             return string.Empty;

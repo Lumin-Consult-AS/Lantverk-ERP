@@ -11,7 +11,7 @@ namespace Erp.Client.Services;
 /// Pure REST HTTP client for communicating with the ERP Core API (<c>/api/v1/*</c>).
 /// Contains no domain-specific logic; all operations are driven by declarative metadata.
 /// </summary>
-public sealed class ErpApiClient(HttpClient httpClient, I18nService i18n)
+public sealed class ErpApiClient(HttpClient httpClient, I18nService i18n, RegionService? region = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -72,6 +72,17 @@ public sealed class ErpApiClient(HttpClient httpClient, I18nService i18n)
     public async Task RefreshSessionAndMetadataAsync(CancellationToken ct = default)
     {
         CurrentSession = await httpClient.GetFromJsonAsync<ClientSessionInfo>("/api/v1/session", JsonOptions, ct);
+
+        // The user's language and region (or the tenant's defaults) come from the server, so they follow the user between devices
+        if (CurrentSession?.User is { } sessionUser)
+        {
+            region?.SetRegion(sessionUser.EffectiveRegion);
+            if (!string.IsNullOrEmpty(sessionUser.EffectiveLanguage))
+            {
+                i18n.SetLocale(sessionUser.EffectiveLanguage);
+            }
+        }
+
         var translations = await GetTranslationsAsync(i18n.CurrentLocale, ct);
         i18n.LoadAppTranslations(translations);
         OnStateChanged?.Invoke();
@@ -109,6 +120,35 @@ public sealed class ErpApiClient(HttpClient httpClient, I18nService i18n)
                JsonOptions,
                ct)
            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    public async Task<ClientPreferences?> GetPreferencesAsync(CancellationToken ct = default)
+        => await httpClient.GetFromJsonAsync<ClientPreferences>("/api/v1/me/preferences", JsonOptions, ct);
+
+    /// <summary>Saves the user's choice (null = use the tenant's default) and applies it at once.</summary>
+    public async Task<ClientPreferences?> SavePreferencesAsync(string? language, string? region, CancellationToken ct = default)
+    {
+        using var res = await httpClient.PutAsJsonAsync("/api/v1/me/preferences", new { language, region }, JsonOptions, ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var saved = await res.Content.ReadFromJsonAsync<ClientPreferences>(JsonOptions, ct);
+        await RefreshSessionAndMetadataAsync(ct);
+        return saved;
+    }
+
+    public async Task<bool> SaveTenantPreferencesAsync(string defaultLanguage, string defaultRegion, CancellationToken ct = default)
+    {
+        using var res = await httpClient.PutAsJsonAsync("/api/v1/tenant/preferences", new { defaultLanguage, defaultRegion }, JsonOptions, ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            return false;
+        }
+
+        await RefreshSessionAndMetadataAsync(ct);
+        return true;
+    }
 
     public async Task SwitchLocaleAsync(string locale, CancellationToken ct = default)
     {

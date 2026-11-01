@@ -29,6 +29,7 @@ public sealed class ClientTenantSummary
     public string Name { get; set; } = string.Empty;
     public string Slug { get; set; } = string.Empty;
     public string DefaultCountryCode { get; set; } = "NO";
+    public string DefaultLanguage { get; set; } = "nb";
 }
 
 public sealed class ClientCompanySummary
@@ -44,6 +45,22 @@ public sealed class ClientUserSummary
     public string Email { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public List<string> Roles { get; set; } = [];
+    public string? Language { get; set; }
+    public string? Region { get; set; }
+    public string? EffectiveLanguage { get; set; }
+    public string? EffectiveRegion { get; set; }
+}
+
+/// <summary>The user's own choice of language and region, what applies (the choice or the tenant's default) and the defaults.</summary>
+public sealed class ClientPreferences
+{
+    public string? Language { get; set; }
+    public string? Region { get; set; }
+    public string EffectiveLanguage { get; set; } = "nb";
+    public string EffectiveRegion { get; set; } = "NO";
+    public string TenantDefaultLanguage { get; set; } = "nb";
+    public string TenantDefaultRegion { get; set; } = "NO";
+    public List<string> Languages { get; set; } = [];
 }
 
 /// <summary>A user as an administrator sees them (user administration).</summary>

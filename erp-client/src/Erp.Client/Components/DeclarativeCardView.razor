@@ -1,5 +1,6 @@
 @inject ErpApiClient Api
 @inject I18nService I18n
+@inject RegionService Region
 @inject NavigationManager Nav
 
 <MudPaper Elevation="2" Class="pa-4" data-page-id="@Page.Id" data-page-type="card">
@@ -159,7 +160,7 @@
                                         @foreach (var col in tab.Fields)
                                         {
                                             <td>
-                                                @(sr.Fields.TryGetValue(col, out var sv) ? I18nService.UnwrapDisplayString(sv) : string.Empty)
+                                                @(sr.Fields.TryGetValue(col, out var sv) ? Region.Display(subObjDef?.Fields.FirstOrDefault(f => string.Equals(f.Name, col, StringComparison.OrdinalIgnoreCase)), sv) : string.Empty)
                                             </td>
                                         }
                                     </tr>

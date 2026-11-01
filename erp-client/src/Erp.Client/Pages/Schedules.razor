@@ -1,6 +1,7 @@
 @page "/schedules"
 @inject ErpApiClient Api
 @inject I18nService I18n
+@inject RegionService Region
 
 <MudPaper Elevation="2" Class="pa-4 mb-4">
     <MudText Typo="Typo.h6" Class="mb-2">@I18n.T("ui.schedules.title")</MudText>
@@ -41,14 +42,14 @@
                         <MudChip T="string" Size="Size.Small" Color="@(context.LastStatus == "ok" ? Color.Success : Color.Error)">
                             @(context.LastStatus == "ok" ? I18n.T("ui.schedules.ok") : I18n.T("ui.schedules.failed"))
                         </MudChip>
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@context.LastRunAt.Value.ToLocalTime().ToString("g")</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Region.FormatDateTime(context.LastRunAt.Value)</MudText>
                     }
                 </MudTd>
                 <MudTd>
                     @if (context.Enabled)
                     {
                         <MudChip T="string" Size="Size.Small" Color="Color.Info">@I18n.T("ui.schedules.running")</MudChip>
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@context.NextRunAt.ToLocalTime().ToString("g")</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Region.FormatDateTime(context.NextRunAt)</MudText>
                     }
                     else
                     {
@@ -90,7 +91,7 @@
                                     <MudTh>@I18n.T("ui.schedules.message")</MudTh>
                                 </HeaderContent>
                                 <RowTemplate Context="run">
-                                    <MudTd>@run.StartedAt.ToLocalTime().ToString("g")</MudTd>
+                                    <MudTd>@Region.FormatDateTime(run.StartedAt)</MudTd>
                                     <MudTd>@(run.Trigger == "manual" ? I18n.T("ui.schedules.triggerManual") : I18n.T("ui.schedules.triggerSchedule"))</MudTd>
                                     <MudTd>
                                         <MudChip T="string" Size="Size.Small" Color="@(run.Status == "ok" ? Color.Success : Color.Error)">

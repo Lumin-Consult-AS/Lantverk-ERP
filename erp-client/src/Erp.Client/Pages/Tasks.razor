@@ -2,6 +2,7 @@
 @page "/tasks/{TaskId:guid}"
 @inject ErpApiClient Api
 @inject I18nService I18n
+@inject RegionService Region
 @implements IDisposable
 
 <MudPaper Elevation="2" Class="pa-4">
@@ -31,7 +32,7 @@
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">
                             @if (task.DueAt is not null)
                             {
-                                <span>@I18n.T("ui.tasks.due"): @task.DueAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                                <span>@I18n.T("ui.tasks.due"): @Region.FormatDateTime(task.DueAt.Value)</span>
                             }
                             @if (task.Escalated)
                             {

@@ -228,6 +228,11 @@ public sealed class CoreDbContext(
             .HasMaxLength(2)
             .IsRequired();
 
+        builder.Property(e => e.DefaultLanguage)
+            .HasColumnName("default_language")
+            .HasMaxLength(8)
+            .IsRequired();
+
         builder.Property(e => e.IsActive)
             .HasColumnName("is_active")
             .IsRequired();
@@ -352,6 +357,14 @@ public sealed class CoreDbContext(
             .HasColumnName("accessible_company_ids")
             .HasColumnType("uuid[]")
             .IsRequired();
+
+        builder.Property(e => e.Language)
+            .HasColumnName("language")
+            .HasMaxLength(8);
+
+        builder.Property(e => e.Region)
+            .HasColumnName("region")
+            .HasMaxLength(2);
 
         builder.Property(e => e.IsActive)
             .HasColumnName("is_active")

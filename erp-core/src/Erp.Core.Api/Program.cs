@@ -337,7 +337,8 @@ v1.MapGet("/session", async (
             tenant.Id,
             tenant.Name,
             tenant.Slug,
-            tenant.DefaultCountryCode
+            tenant.DefaultCountryCode,
+            tenant.DefaultLanguage
         },
         company = company is null ? null : new
         {
@@ -353,7 +354,11 @@ v1.MapGet("/session", async (
             user.Email,
             user.DisplayName,
             user.Roles,
-            user.AccessibleCompanyIds
+            user.AccessibleCompanyIds,
+            user.Language,
+            user.Region,
+            EffectiveLanguage = user.Language ?? tenant.DefaultLanguage,
+            EffectiveRegion = user.Region ?? tenant.DefaultCountryCode
         },
         installedApps,
         navigation = Array.Empty<object>()
@@ -383,6 +388,7 @@ v1.MapEventEndpoints();
 v1.MapWorkflowEndpoints();
 v1.MapRoleEndpoints();
 v1.MapUserEndpoints();
+v1.MapPreferencesEndpoints();
 v1.MapDocumentEndpoints();
 v1.MapSyncEndpoints();
 v1.MapScheduleEndpoints();
