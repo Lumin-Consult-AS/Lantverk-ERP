@@ -1,0 +1,34 @@
+id: ehf
+version: 1.0.0
+name: EHF (PEPPOL BIS Billing 3.0)
+publisher: Laftverk
+license: proprietary
+sdk: ">=1.0.0 <2.0.0"
+
+dependencies:
+  finance: ">=1.0.0 <2.0.0"
+  norway: ">=1.0.0 <2.0.0"
+
+# Sender utgående fakturaer som EHF og tar imot inngående EHF som bilagsforslag. Formatet (UBL 2.1, PEPPOL BIS Billing 3.0) lages
+# og leses her; selve forsendelsen går gjennom et aksesspunkt bak grensesnittet IAccessPoint, slik at leverandøren kan byttes
+# (ADR-0031). Uten et konfigurert aksesspunkt feiler sending med en tydelig melding, og ingenting sendes.
+runtime:
+  image: ghcr.io/laftverk/ehf:1.0.0
+  resources:
+    cpu: 100m
+    memory: 192Mi
+
+events:
+  subscribes:
+    - finance.salesinvoice.send.requested@1: OnSendRequested
+
+commands:
+  - id: ehf.receive
+    label: Hent innkommende EHF
+    handler: Receive
+
+schedules:
+  - id: ehf.receive.regularly
+    label: Hent innkommende EHF
+    command: ehf.receive
+    everyMinutes: 15

@@ -324,6 +324,13 @@ objects:
 # MVA-kode på bilagslinjen, og SAF-T grupperingskategori og -kode på kontoen. Linjer som appen lager for MVA-beløpet peker tilbake
 # til linjen med grunnlaget.
 extensions:
+  # MVA-kode på en salgslinje (utgående MVA). Satsen og MVA-beløpet settes på linjen, og koden følger med til bilagslinjen.
+  finance.salesinvoiceline:
+    fields:
+      vatCode:
+        type: reference
+        to: norway.vatcode
+        label: MVA-kode
   # MVA-kode på en fakturalinje: foreslås ut fra satsen i dokumentet og følger med til bilagslinjen når fakturaen bokføres.
   finance.supplierinvoiceline:
     fields:

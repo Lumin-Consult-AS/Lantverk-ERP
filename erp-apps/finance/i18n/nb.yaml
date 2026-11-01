@@ -23,6 +23,8 @@ finance:
     title: Bankavstemming
   supplierinvoices:
     title: Leverandørfakturaer
+  salesinvoices:
+    title: Utgående fakturaer
   card:
     source: Dokument
     reconciliation: Avstemming
@@ -40,6 +42,7 @@ finance:
     release: Frigi til bank
     post: Bokfør
     retry: Tolk på nytt
+    send: Send faktura
     reopen: Åpne på nytt
   fields:
     number: Kontonummer
