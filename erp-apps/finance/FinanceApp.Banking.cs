@@ -154,6 +154,7 @@ public sealed partial class FinanceApp
                 ["amount"] = -item.Get<decimal>("remaining"),
                 ["currency"] = bank.Get<string>("currency"),
                 ["message"] = Truncate(posting?.Get<string>("description"), 140),
+                ["paymentReference"] = string.IsNullOrWhiteSpace(item.Get<string>("paymentReference")) ? null : item.Get<string>("paymentReference"),
                 ["dueDate"] = item.Get<DateOnly>("dueDate")
             });
         }

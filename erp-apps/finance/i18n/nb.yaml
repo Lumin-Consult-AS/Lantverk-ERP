@@ -21,7 +21,10 @@ finance:
     title: Banktransaksjoner
   bankreconciliations:
     title: Bankavstemming
+  supplierinvoices:
+    title: Leverandørfakturaer
   card:
+    source: Dokument
     reconciliation: Avstemming
     delivery: Bank
     payments: Betalinger
@@ -36,6 +39,8 @@ finance:
     reject: Avvis
     release: Frigi til bank
     post: Bokfør
+    retry: Tolk på nytt
+    reopen: Åpne på nytt
   fields:
     number: Kontonummer
     name: Navn

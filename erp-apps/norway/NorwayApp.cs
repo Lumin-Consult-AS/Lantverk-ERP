@@ -34,6 +34,11 @@ public sealed class NorwayApp : AppBase
     private const string KidObject = "norway.kid";
     private const string OpenItem = "finance.openitem";
     private const string Payment = "finance.payment";
+    private const string Invoice = "finance.supplierinvoice";
+    private const string InvoiceLine = "finance.supplierinvoiceline";
+
+    // The domestic input VAT codes a supplier invoice is coded with, by rate (the code names say which is which)
+    private static readonly string[] InputDeductionCodes = ["1", "11", "12", "13"];
     private const string Account = "finance.account";
     private const string Voucher = "finance.voucher";
     private const string Line = "finance.voucherline";
@@ -449,6 +454,50 @@ public sealed class NorwayApp : AppBase
         payment.Get<string>("paymentReference") is { Length: > 0 } reference && !Kid.IsValid(reference)
             ? ValidationResult.Error("paymentReference", $"{reference} er ikke en gyldig KID (2–25 siffer med riktig kontrollsiffer).")
             : ValidationResult.Ok;
+
+    // ------------------------------------------------------------------ supplier invoices
+
+    /// <summary>
+    /// Proposes the VAT code of an invoice line from the rate the document states (25 % is code 1, 15 % code 11, 12 % code 13), if
+    /// it has none. A line without a stated rate, or at 0 %, is left for a person.
+    /// </summary>
+    [OnAfterSave(InvoiceLine)]
+    public async Task AfterInvoiceLineSaved(Record changed, Erp.Sdk.AppContext ctx)
+    {
+        var line = await ctx.Data.GetAsync(InvoiceLine, changed.Id);
+        if (line is null || line.Get<Guid?>(LineVatCode) is not null || line.Get<decimal?>("vatRate") is not > 0
+            || await ctx.Data.GetAsync(Invoice, line.Get<Guid>("invoice")) is not { } invoice)
+        {
+            return;
+        }
+
+        var rate = line.Get<decimal>("vatRate");
+        var date = invoice.Get<DateOnly?>("invoiceDate") ?? ctx.Today;
+        foreach (var code in await ctx.Data.QueryAsync(VatCode, "isActive eq true", top: 500))
+        {
+            if (InputDeductionCodes.Contains(code.Get<string>("code"))
+                && await ResolveAsync(ctx, code.Id, date) is { Rate: { } found } && found == rate)
+            {
+                await ctx.Data.UpdateAsync(InvoiceLine, line.Id, line.RowVersion, new Dictionary<string, object?> { [LineVatCode] = code.Id });
+                return;
+            }
+        }
+    }
+
+    /// <summary>The payment reference on an invoice that goes to approval must be a valid KID, so the payment can carry it.</summary>
+    [OnValidate(Invoice)]
+    public async Task<ValidationResult> ValidateInvoiceReference(Record changed, Erp.Sdk.AppContext ctx)
+    {
+        // The change to "pending" carries only the status, so the stored invoice is read
+        if (changed.Get<string>("status") != "pending"
+            || (await ctx.Data.GetAsync(Invoice, changed.Id))?.Get<string>("paymentReference") is not { Length: > 0 } reference
+            || Kid.IsValid(reference))
+        {
+            return ValidationResult.Ok;
+        }
+
+        return ValidationResult.Error("paymentReference", $"{reference} er ikke en gyldig KID (2–25 siffer med riktig kontrollsiffer). Rett den etter fakturaen, eller tøm feltet.");
+    }
 
     // ------------------------------------------------------------------ SAF-T export
 

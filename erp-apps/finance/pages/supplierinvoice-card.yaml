@@ -1,0 +1,66 @@
+id: finance.supplierinvoice-card
+type: card
+object: finance.supplierinvoice
+title: "{supplierName} {invoiceNumber}"
+groups:
+  - label: finance.card.general
+    fields:
+      - supplier
+      - supplierName
+      - supplierOrgNumber
+      - invoiceNumber
+      - invoiceDate
+      - dueDate
+      - currency
+      - totalAmount
+      - vatAmount
+      - paymentReference
+      - bankAccount
+      - status
+  - label: finance.card.source
+    fields:
+      - file
+      - extractor
+      - message
+      - voucher
+actions:
+  - id: submit
+    label: finance.actions.submit
+    transition: submit
+    placement: primary
+  - id: approve
+    label: finance.actions.approve
+    transition: approve
+    placement: primary
+  - id: post
+    label: finance.actions.post
+    transition: post
+    placement: primary
+  - id: retry
+    label: finance.actions.retry
+    transition: retry
+    placement: primary
+  - id: reject
+    label: finance.actions.reject
+    transition: reject
+    placement: secondary
+  - id: reopen
+    label: finance.actions.reopen
+    transition: reopen
+    placement: secondary
+tabs:
+  - label: finance.card.lines
+    list:
+      object: finance.supplierinvoiceline
+      filter:
+        invoice: "{id}"
+      fields:
+        - description
+        - amount
+        - vatRate
+        - vatAmount
+        - account
+        - suggestedAccount
+        - dimension1
+        - dimension2
+        - dimension3

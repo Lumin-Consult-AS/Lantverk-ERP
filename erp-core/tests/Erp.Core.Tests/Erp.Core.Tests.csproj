@@ -21,6 +21,7 @@
     <ProjectReference Include="../../../erp-apps/finance/Finance.App.csproj" />
     <ProjectReference Include="../../../erp-apps/norway/Norway.App.csproj" />
     <ProjectReference Include="../../../erp-apps/bank.iso20022/Bank.Iso20022.App.csproj" />
+    <ProjectReference Include="../../../erp-apps/invoice.claude/Invoice.Claude.App.csproj" />
     <ProjectReference Include="../../../erp-apps/fx.norgesbank/Fx.NorgesBank.App.csproj" />
   </ItemGroup>
 
