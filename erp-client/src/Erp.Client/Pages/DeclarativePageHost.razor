@@ -78,7 +78,8 @@ else if (string.Equals(_page.Type, "dialog", StringComparison.OrdinalIgnoreCase)
 
             _objectsById = allObjects.ToDictionary(o => o.Id, StringComparer.OrdinalIgnoreCase);
             _enumsById = allEnums.ToDictionary(e => e.Id, StringComparer.OrdinalIgnoreCase);
-            _page = allPages.FirstOrDefault(p => string.Equals(p.Id, PageId, StringComparison.OrdinalIgnoreCase));
+            _page = allPages.FirstOrDefault(p => string.Equals(p.Id, PageId, StringComparison.OrdinalIgnoreCase))
+                    ?? BuildFallbackCard(allPages);
 
             if (_page is not null)
             {
@@ -95,6 +96,27 @@ else if (string.Equals(_page.Type, "dialog", StringComparison.OrdinalIgnoreCase)
         {
             _loading = false;
         }
+    }
+
+    // A list opens '<list id minus -list>-card' for new and existing records. When an app has no card page for the object,
+    // show a plain card with all fields (the card view lays out every field when the page has no groups).
+    private ClientPageDefinition? BuildFallbackCard(IReadOnlyList<ClientPageDefinition> allPages)
+    {
+        const string suffix = "-card";
+        if (!PageId.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var baseId = PageId[..^suffix.Length];
+        var objectId = allPages.FirstOrDefault(p => string.Equals(p.Id, baseId + "-list", StringComparison.OrdinalIgnoreCase))?.Object
+                       ?? baseId;
+        if (!_objectsById.TryGetValue(objectId, out var obj))
+        {
+            return null;
+        }
+
+        return new ClientPageDefinition { Id = PageId, OwnerApp = obj.OwnerApp, Type = "card", Object = obj.Id };
     }
 
     public void Dispose()

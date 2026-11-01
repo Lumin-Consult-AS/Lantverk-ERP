@@ -1,0 +1,9 @@
+id: core.itemgroup-card
+type: card
+object: core.itemgroup
+title: "{code} – {name}"
+groups:
+  - label: items.card.general
+    fields:
+      - code
+      - name

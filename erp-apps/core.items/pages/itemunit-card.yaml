@@ -1,0 +1,9 @@
+id: core.itemunit-card
+type: card
+object: core.itemunit
+title: "{code} – {name}"
+groups:
+  - label: items.card.general
+    fields:
+      - code
+      - name

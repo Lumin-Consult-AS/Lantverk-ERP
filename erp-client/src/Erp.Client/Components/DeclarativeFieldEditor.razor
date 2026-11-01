@@ -1,5 +1,6 @@
 @using System.Globalization
 @inject I18nService I18n
+@inject ErpApiClient Api
 
 @if (ClientFieldValidator.IsFieldVisible(Field, RecordFields))
 {
@@ -28,6 +29,26 @@
                 @foreach (var opt in EnumValues)
                 {
                     <MudSelectItem T="string" Value="@opt">@opt</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        else if (Field.Type == ClientFieldType.Reference && !string.IsNullOrWhiteSpace(Field.TargetObject))
+        {
+            <MudSelect T="string"
+                       Label="@DisplayLabel"
+                       Value="@GetStringValue()"
+                       ValueChanged="@OnStringChanged"
+                       Required="@IsRequired"
+                       ReadOnly="@IsReadOnly"
+                       Clearable="@(!IsRequired && !IsReadOnly)"
+                       Error="@(!string.IsNullOrEmpty(ValidationError))"
+                       ErrorText="@ValidationError"
+                       HelperText="@(_options.Count == 0 && _optionsLoaded ? NoOptionsText : null)"
+                       Variant="Variant.Outlined"
+                       Margin="Margin.Dense">
+                @foreach (var opt in _options)
+                {
+                    <MudSelectItem T="string" Value="@opt.Value">@opt.Label</MudSelectItem>
                 }
             </MudSelect>
         }
@@ -70,6 +91,48 @@
     [Parameter] public IReadOnlyList<string> EnumValues { get; set; } = [];
     [Parameter] public string? ValidationError { get; set; }
     [Parameter] public EventCallback OnValueChanged { get; set; }
+
+    private sealed record RefOption(string Value, string Label);
+
+    private List<RefOption> _options = [];
+    private bool _optionsLoaded;
+    private string? _loadedTarget;
+
+    private string NoOptionsText => $"Ingen poster finnes i {Field.TargetObject} ennå. Opprett en først.";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Field.Type != ClientFieldType.Reference
+            || string.IsNullOrWhiteSpace(Field.TargetObject)
+            || string.Equals(_loadedTarget, Field.TargetObject, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _loadedTarget = Field.TargetObject;
+        try
+        {
+            var rows = await Api.QueryRecordsAsync(Field.TargetObject, top: 200);
+            _options = rows.Select(r => new RefOption(r.Id.ToString("D"), RecordLabel(r))).OrderBy(o => o.Label).ToList();
+        }
+        catch (Exception)
+        {
+            _options = [];
+        }
+
+        _optionsLoaded = true;
+    }
+
+    // Shows the business key and name when the target has them (code/name, itemNumber/name ...); falls back to the id.
+    private static string RecordLabel(ClientRecordData r)
+    {
+        string Get(string key) => r.Fields.TryGetValue(key, out var v) ? I18nService.UnwrapDisplayString(v) : string.Empty;
+
+        var key = new[] { "code", "itemNumber", "partyNumber", "number" }.Select(Get).FirstOrDefault(s => s.Length > 0) ?? string.Empty;
+        var name = Get("name");
+        var label = key.Length > 0 && name.Length > 0 ? $"{key} – {name}" : key.Length > 0 ? key : name;
+        return label.Length > 0 ? label : r.Id.ToString("D")[..8];
+    }
 
     private string ExposedName => Field.GetExposedName(ObjectOwnerApp);
     private bool IsRequired => ClientFieldValidator.IsFieldRequired(Field, RecordFields);

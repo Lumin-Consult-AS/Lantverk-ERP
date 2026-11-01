@@ -60,28 +60,24 @@
             <div class="d-flex flex-wrap align-center justify-space-between mb-3 gap-2">
                 <MudText Typo="Typo.h6">@I18n.T("ui.nav.apps")</MudText>
                 <div class="d-flex gap-1">
-                    @if (!IsCorePartiesInstalled)
+                </div>
+            </div>
+
+            @if (AvailableBuiltIns.Count > 0)
+            {
+                <div class="d-flex flex-wrap gap-1 mb-3">
+                    @foreach (var builtIn in AvailableBuiltIns)
                     {
                         <MudButton Variant="Variant.Filled"
                                    Color="Color.Primary"
                                    Size="Size.Small"
-                                   OnClick="@InstallCorePartiesAsync"
-                                   data-action="install-core-parties">
-                            @I18n.T("ui.action.installCoreParties")
-                        </MudButton>
-                    }
-                    else if (!IsDemoContactsInstalled)
-                    {
-                        <MudButton Variant="Variant.Filled"
-                                   Color="Color.Secondary"
-                                   Size="Size.Small"
-                                   OnClick="@InstallDemoContactsAsync"
-                                   data-action="install-demo-contacts">
-                            Installer Kontakter (demo.contacts)
+                                   OnClick="@(() => InstallBuiltInAsync(builtIn.AppId))"
+                                   data-action="@($"install-{builtIn.AppId}")">
+                            Installer @builtIn.Name (@builtIn.AppId)
                         </MudButton>
                     }
                 </div>
-            </div>
+            }
 
             @if (_installedApps.Count == 0)
             {
@@ -135,11 +131,28 @@
     private IReadOnlyList<ClientInstalledAppSummary> _installedApps =>
         Api.CurrentSession?.InstalledApps ?? [];
 
-    private bool IsCorePartiesInstalled =>
-        _installedApps.Any(a => string.Equals(a.AppId, "core.parties", StringComparison.OrdinalIgnoreCase));
+    private sealed record BuiltInApp(string AppId, string Name, string[] DependsOn);
 
-    private bool IsDemoContactsInstalled =>
-        _installedApps.Any(a => string.Equals(a.AppId, "demo.contacts", StringComparison.OrdinalIgnoreCase));
+    // Apps shipped in the repo (erp-apps, erp-samples). An app is offered once the apps it depends on are installed.
+    private static readonly BuiltInApp[] BuiltInApps =
+    [
+        new("core.parties", "Parter", []),
+        new("core.dimensions", "Dimensjoner", []),
+        new("core.organization", "Organisasjon", []),
+        new("core.currencies", "Valutakurser", []),
+        new("core.items", "Varer", []),
+        new("demo.contacts", "Kontakter", ["core.parties"]),
+        new("fx.norgesbank", "Valutakurser fra Norges Bank", ["core.currencies"]),
+        new("finance", "Regnskap", ["core.parties", "core.dimensions", "core.organization", "core.currencies"]),
+        new("norway", "Norge-pakken", ["finance"]),
+        new("bank.iso20022", "Bank – ISO 20022-filer", ["finance"]),
+    ];
+
+    private bool IsInstalled(string appId) =>
+        _installedApps.Any(a => string.Equals(a.AppId, appId, StringComparison.OrdinalIgnoreCase));
+
+    private List<BuiltInApp> AvailableBuiltIns =>
+        BuiltInApps.Where(b => !IsInstalled(b.AppId) && b.DependsOn.All(IsInstalled)).ToList();
 
     private IReadOnlyList<ClientAttentionItem> _attention = [];
     private bool _showHidden;
@@ -233,9 +246,7 @@
         await LoadAttentionAsync();
     }
 
-    private Task InstallCorePartiesAsync() => RunAppActionAsync(() => Api.InstallBuiltInAppAsync("core.parties"), "ui.error.install");
-
-    private Task InstallDemoContactsAsync() => RunAppActionAsync(() => Api.InstallBuiltInAppAsync("demo.contacts"), "ui.error.install");
+    private Task InstallBuiltInAsync(string appId) => RunAppActionAsync(() => Api.InstallBuiltInAppAsync(appId), "ui.error.install");
 
     private Task UninstallAppAsync(string appId) => RunAppActionAsync(() => Api.UninstallAppAsync(appId), "ui.error.uninstall");
 

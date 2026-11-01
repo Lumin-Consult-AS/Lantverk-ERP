@@ -32,6 +32,7 @@ Disse må avgjøres av deg før respektive steg starter. Kodeagenten stopper og 
 | B7 | AI-leverandør i EU til fakturatolk | Steg 8 | Velg leverandør som lover EU-behandling uten trening på kundedata |
 | B8 | Skatteetaten/Altinn: systemleverandørstatus, Maskinporten og systembruker. Avklaring med Knowit er en forutsetning | Steg 10 (innsending) | Søk tidlig, siden saksbehandling tar tid. Generering og validering bygges uten |
 | B9 | Pilotkunde (helst før fase 2 er ferdig) | Før fase 3 | Begynn å lete nå |
+| B10 | Hvor lagres språk og region: per bruker med tenant-standard, eller bare per tenant? | Steg 12 | Per bruker, med tenant-standard som utgangspunkt for nye brukere |
 
 ---
 
@@ -207,6 +208,24 @@ Disse må avgjøres av deg før respektive steg starter. Kodeagenten stopper og 
 
 ---
 
+## Steg 12 – Språk, region og datoformat
+
+**Mål:** Brukeren velger språk og region, og klienten viser og leser datoer, tall og beløp i det formatet (norsk: `31.12.2026`, `1 234,56`). Funnet under manuell testing: datofelt krever i dag `YYYY-MM-DD` og tall bruker punktum, noe en norsk bruker ikke forventer.
+
+**Innhold**
+- **Innstilling per bruker** (se B10) for språk (`nb`, `en`) og region (`NO` først; land er grunnbegrep i kjernen). Tenant har en standard som nye brukere får. Kjernen lagrer kun språk- og regionskoder; den kjenner ikke formatene.
+- **Klienten formaterer og leser etter regionen:** datoer (`dd.MM.yyyy`, ukestart mandag), tall og beløp (desimalkomma, tusenskille), og datovelger i stedet for fritekst. Brukeren kan fortsatt skrive datoer på kortform (`311226`) hvis det er enkelt å støtte.
+- **API, lagring, hendelser og eksport er uendret:** ISO 8601-datoer og tall med punktum. Formatering og parsing skjer bare i klienten, og feil formatering skal aldri nå data-API-et.
+- **Språkvelgeren i toppmenyen (NB/EN) flyttes** til innstillingen, og valget huskes mellom økter.
+- **Oversettelser** i nb og en for nye tekster (i18n-nøkler, regel i `AGENTS.md`).
+- ADR som beskriver hvor innstillingen ligger og hvorfor formatering ikke hører hjemme i kjernen eller appene.
+
+**Ferdig når** en bruker kan velge norsk region og taste og se `31.12.2026` og `1 234,56` i kort og lister (for eksempel regnskapsår og valutakurs), samme data vises riktig for en bruker med engelsk region, og en test viser at API-et fortsatt lagrer og returnerer ISO-datoer og punktum-tall.
+
+**Beslutning:** B10.
+
+---
+
 ## Avhengigheter og rekkefølge
 
 ```
@@ -216,7 +235,7 @@ Disse må avgjøres av deg før respektive steg starter. Kodeagenten stopper og 
                                                        └─▶ 8 Fakturatolk ─▶ 9 EHF ─▶ 10 Skatteetaten ─▶ 11 Port
 ```
 
-Steg 6–7 og 8–9 er uavhengige av hverandre og kan bytte rekkefølge. Eksterne avklaringer (B5–B9) har ledetid, så de bør settes i gang parallelt med steg 0–3.
+Steg 6–7 og 8–9 er uavhengige av hverandre og kan bytte rekkefølge. Steg 12 (språk og region) er uavhengig av de andre og kan tas når som helst; den bør komme før regnskapsførertesten i steg 11, siden en norsk bruker trenger norsk datoformat. Eksterne avklaringer (B5–B9) har ledetid, så de bør settes i gang parallelt med steg 0–3.
 
 ## Utsatt (skal ikke bygges i fase 2)
 

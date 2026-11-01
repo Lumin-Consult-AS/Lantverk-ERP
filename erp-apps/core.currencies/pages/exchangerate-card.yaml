@@ -1,0 +1,12 @@
+id: core.exchangerate-card
+type: card
+object: core.exchangerate
+title: "{fromCurrency}/{toCurrency} {rateDate}"
+groups:
+  - label: currencies.card.general
+    fields:
+      - fromCurrency
+      - toCurrency
+      - rateDate
+      - rate
+      - source

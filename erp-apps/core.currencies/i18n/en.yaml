@@ -1,6 +1,8 @@
 currencies:
   list:
     title: Exchange rates
+  card:
+    general: General
   fields:
     fromCurrency: From currency
     toCurrency: To currency

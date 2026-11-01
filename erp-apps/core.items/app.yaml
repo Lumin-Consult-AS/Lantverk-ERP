@@ -121,6 +121,8 @@ pages:
   - pages/item-card.yaml
   - pages/itemunit-list.yaml
   - pages/itemgroup-list.yaml
+  - pages/itemunit-card.yaml
+  - pages/itemgroup-card.yaml
 
 permissionSets:
   - id: core.items.reader

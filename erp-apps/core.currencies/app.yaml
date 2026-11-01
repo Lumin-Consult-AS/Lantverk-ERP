@@ -48,6 +48,7 @@ events:
 
 pages:
   - pages/exchangerate-list.yaml
+  - pages/exchangerate-card.yaml
 
 permissionSets:
   - id: core.currencies.reader

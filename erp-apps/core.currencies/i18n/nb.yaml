@@ -1,6 +1,8 @@
 currencies:
   list:
     title: Valutakurser
+  card:
+    general: Generelt
   fields:
     fromCurrency: Fra valuta
     toCurrency: Til valuta
