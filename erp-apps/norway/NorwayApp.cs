@@ -13,6 +13,10 @@ public sealed record JournalPosted(Guid EntryId, Guid VoucherId);
 
 public sealed record SaftExportRequested(Guid ExportId);
 
+public sealed record VatSubmissionRequested(Guid SubmissionId);
+
+public sealed class MeldingException(string message) : Exception(message);
+
 /// <summary>
 /// Everything Norwegian in the accounting: the standard chart of accounts (NS 4102) with SAF-T standard accounts, the VAT
 /// codes with rates and validity, VAT on voucher lines, the VAT return per term, and the rule that a voucher has a text. The
@@ -31,6 +35,7 @@ public sealed class NorwayApp : AppBase
     private const string VatReturn = "norway.vatreturn";
     private const string VatReturnLine = "norway.vatreturnline";
     private const string SaftExport = "norway.saftexport";
+    private const string VatSubmission = "norway.vatsubmission";
     private const string KidObject = "norway.kid";
     private const string OpenItem = "finance.openitem";
     private const string Payment = "finance.payment";
@@ -615,6 +620,128 @@ public sealed class NorwayApp : AppBase
         await ctx.Data.UpdateAsync(SaftExport, current.Id, current.RowVersion, result);
     }
 
+    // ------------------------------------------------------------------ the VAT return in Skatteetaten's format
+
+    [OnAfterSave(VatSubmission)]
+    public async Task AfterSubmissionSaved(Record submission, Erp.Sdk.AppContext ctx)
+    {
+        if (submission.Get<string>("status") == "requested")
+        {
+            await ctx.Events.PublishAsync("norway.vatsubmission.requested@1", submission.Id.ToString(), new { submissionId = submission.Id });
+        }
+    }
+
+    /// <summary>
+    /// Makes the VAT return for a calculated term in Skatteetaten's XML format, checks it (schema and business rules) and stores it. A
+    /// message that does not pass is never handed out; the reasons are on the request. Safe to deliver again.
+    /// </summary>
+    [OnEvent("norway.vatsubmission.requested@1")]
+    public async Task OnVatSubmissionRequested(VatSubmissionRequested e, Erp.Sdk.AppContext ctx)
+    {
+        var submission = await ctx.Data.GetAsync(VatSubmission, e.SubmissionId);
+        if (submission is null || submission.Get<string>("status") != "requested")
+        {
+            return;
+        }
+
+        var result = new Dictionary<string, object?>();
+        try
+        {
+            var vatReturn = await ctx.Data.GetAsync(VatReturn, submission.Get<Guid>("vatReturn"))
+                ?? throw new MeldingException("MVA-oppgjøret finnes ikke.");
+            if (vatReturn.Get<string>("status") != "calculated")
+            {
+                throw new MeldingException("Beregn MVA-oppgjøret før meldingen lages.");
+            }
+
+            var settings = (await ctx.Data.QueryAsync(Settings, top: 1)).FirstOrDefault();
+            var org = settings?.Get<string>("organizationNumber");
+            if (string.IsNullOrWhiteSpace(org))
+            {
+                throw new MeldingException("Organisasjonsnummer mangler i Norsk oppsett.");
+            }
+
+            var start = vatReturn.Get<DateOnly>("startDate");
+            var end = vatReturn.Get<DateOnly>("endDate");
+            var period = Mva.VatMelding.Period(start, end)
+                ?? throw new MeldingException($"Terminen {start:yyyy-MM-dd} – {end:yyyy-MM-dd} svarer ikke til en skattleggingsperiode (måned, to, tre eller seks måneder, eller år fra januar).");
+
+            var lines = new List<Mva.MeldingLine>();
+            var left = new List<string>();
+            foreach (var line in await ctx.Data.QueryAsync(VatReturnLine, $"vatReturn eq '{vatReturn.Id}'", top: 1000))
+            {
+                var code = await ctx.Data.GetAsync(VatCode, line.Get<Guid>("vatCode"));
+                var text = code?.Get<string>("code") ?? "?";
+                if (Mva.VatMelding.NotReported.Contains(text))
+                {
+                    left.Add(text);
+                    continue;
+                }
+
+                var basis = Mva.VatMelding.Kroner(line.Get<decimal>("basis"));
+                var vat = Mva.VatMelding.Kroner(line.Get<decimal>("vatAmount"));
+                if (basis == 0 && vat == 0)
+                {
+                    continue;
+                }
+
+                if (code?.Get<string>("direction") == "output")
+                {
+                    var rate = (await ResolveAsync(ctx, code.Id, end)).Rate
+                        ?? throw new MeldingException($"MVA-kode {text} har ingen sats i terminen.");
+                    lines.Add(new Mva.MeldingLine(text, text, basis, Mva.VatMelding.RateText(rate), vat));
+                }
+                else
+                {
+                    // Deductible input VAT is reported as a negative amount, without basis and rate
+                    lines.Add(new Mva.MeldingLine(text, text, null, null, -vat));
+                }
+            }
+
+            var melding = new Mva.Melding(
+                submission.Id.ToString("N"), "Laftverk ERP", "1.0", org, submission.Get<string>("category") ?? "alminnelig",
+                period.Element, period.Value, period.Year, settings!.Get<string>("vatPaymentKid"),
+                lines.OrderBy(l => int.Parse(l.Code, System.Globalization.CultureInfo.InvariantCulture)).ToList());
+            var document = Mva.VatMelding.Write(melding);
+            var issues = Mva.VatMelding.Validate(melding, document);
+
+            var notes = issues.Select(i => $"{i.Rule}: {i.Message}").ToList();
+            if (left.Count > 0)
+            {
+                notes.Add($"Kodene {string.Join(", ", left.Order())} rapporteres ikke i MVA-meldingen.");
+            }
+
+            result["reference"] = melding.Reference;
+            result["totalAmount"] = melding.Total;
+            if (issues.Any(i => i.Blocks))
+            {
+                result["status"] = "invalid";
+                result["message"] = Truncate("Meldingen er ikke gyldig og kan ikke sendes: " + string.Join(" | ", notes), 4000);
+            }
+            else
+            {
+                var fileName = $"mva-melding_{org}_{period.Year}_{period.Value}.xml";
+                result["file"] = await ctx.Documents.StoreDocumentAsync(
+                    fileName, "application/xml", System.Text.Encoding.UTF8.GetBytes(document.Declaration + Environment.NewLine + document.Root));
+                result["fileName"] = fileName;
+                result["status"] = "valid";
+                result["message"] = Truncate(
+                    $"MVA-melding (skjema v{Mva.VatMelding.SchemaVersion}) er laget og sjekket. Å betale: {melding.Total} kr (negativt = til gode)."
+                    + (notes.Count > 0 ? " Merk: " + string.Join(" | ", notes) : string.Empty), 4000);
+            }
+        }
+        catch (MeldingException ex)
+        {
+            result["status"] = "failed";
+            result["message"] = ex.Message;
+        }
+
+        var current = await ctx.Data.GetAsync(VatSubmission, e.SubmissionId) ?? submission;
+        await ctx.Data.UpdateAsync(VatSubmission, current.Id, current.RowVersion, result);
+    }
+
+    private static string? Truncate(string? text, int length) => text is null || text.Length <= length ? text : text[..length];
+
     // ------------------------------------------------------------------ the VAT return per term
 
     [OnValidate(VatReturn)]
@@ -630,6 +757,16 @@ public sealed class NorwayApp : AppBase
     [OnAfterSave(VatReturn)]
     public async Task AfterReturnSaved(Record vatReturn, Erp.Sdk.AppContext ctx)
     {
+        // The deadline follows the end of the term
+        if (vatReturn.Get<DateOnly?>("endDate") is { } termEnd && Mva.VatMelding.DueDate(termEnd) is var due && vatReturn.Get<DateOnly?>("deadline") != due)
+        {
+            var stored = await ctx.Data.GetAsync(VatReturn, vatReturn.Id);
+            if (stored is not null && stored.Get<DateOnly?>("deadline") != due)
+            {
+                await ctx.Data.UpdateAsync(VatReturn, stored.Id, stored.RowVersion, new Dictionary<string, object?> { ["deadline"] = due });
+            }
+        }
+
         var lines = await ctx.Data.QueryAsync(VatReturnLine, $"vatReturn eq '{vatReturn.Id}'", top: 1000);
         switch (vatReturn.Get<string>("status"))
         {

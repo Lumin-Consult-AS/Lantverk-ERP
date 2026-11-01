@@ -1,0 +1,11 @@
+id: norway.vatsubmission-list
+type: list
+object: norway.vatsubmission
+title: norway.vatsubmissions.title
+columns:
+  - vatReturn
+  - category
+  - totalAmount
+  - status
+  - fileName
+  - message

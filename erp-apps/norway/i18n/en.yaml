@@ -9,6 +9,8 @@ norway:
     title: VAT entries
   vatreturns:
     title: VAT returns
+  vatsubmissions:
+    title: VAT return (mva-melding)
   saftexports:
     title: SAF-T export
   card:
