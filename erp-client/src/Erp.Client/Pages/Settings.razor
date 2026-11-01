@@ -1,0 +1,137 @@
+@page "/settings"
+@inject ErpApiClient Api
+@inject I18nService I18n
+@inject RegionService Region
+@implements IDisposable
+
+<MudPaper Elevation="2" Class="pa-4 mb-4">
+    <MudText Typo="Typo.h6" Class="mb-3">@I18n.T("ui.settings.title")</MudText>
+
+    @if (_message is not null)
+    {
+        <MudAlert Severity="@(_isError ? Severity.Error : Severity.Success)" Class="mb-3">@_message</MudAlert>
+    }
+
+    <MudText Typo="Typo.subtitle1" Class="mb-2">@I18n.T("ui.settings.mine")</MudText>
+    <MudGrid>
+        <MudItem xs="12" sm="6">
+            <MudSelect T="string" Label="@I18n.T("ui.settings.language")" @bind-Value="_language" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="false">
+                <MudSelectItem T="string" Value="@string.Empty">@I18n.Format("ui.settings.useDefault", LanguageName(_tenantLanguage))</MudSelectItem>
+                @foreach (var lang in _languages)
+                {
+                    <MudSelectItem T="string" Value="@lang">@LanguageName(lang)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudSelect T="string" Label="@I18n.T("ui.settings.region")" @bind-Value="_region" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="false">
+                <MudSelectItem T="string" Value="@string.Empty">@I18n.Format("ui.settings.useDefault", RegionName(_tenantRegion))</MudSelectItem>
+                @foreach (var profile in RegionService.Profiles)
+                {
+                    <MudSelectItem T="string" Value="@profile.Code">@profile.Label</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">@Example()</MudText>
+    <div class="mt-3">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveMineAsync">@I18n.T("ui.action.save")</MudButton>
+    </div>
+
+    @if (_isAdmin)
+    {
+        <MudDivider Class="my-4" />
+        <MudText Typo="Typo.subtitle1" Class="mb-2">@I18n.T("ui.settings.tenant")</MudText>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" Label="@I18n.T("ui.settings.defaultLanguage")" @bind-Value="_tenantLanguage" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var lang in _languages)
+                    {
+                        <MudSelectItem T="string" Value="@lang">@LanguageName(lang)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" Label="@I18n.T("ui.settings.defaultRegion")" @bind-Value="_tenantRegion" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var profile in RegionService.Profiles)
+                    {
+                        <MudSelectItem T="string" Value="@profile.Code">@profile.Label</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+        <div class="mt-3">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveTenantAsync">@I18n.T("ui.action.save")</MudButton>
+        </div>
+    }
+</MudPaper>
+
+@code {
+    private string _language = string.Empty;
+    private string _region = string.Empty;
+    private string _tenantLanguage = "nb";
+    private string _tenantRegion = "NO";
+    private IReadOnlyList<string> _languages = ["nb", "en"];
+    private bool _isAdmin;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        I18n.OnLocaleChanged += StateHasChanged;
+        Region.OnRegionChanged += StateHasChanged;
+        if (Api.CurrentAuth is null)
+        {
+            await Api.DevLoginAsync();
+        }
+
+        _isAdmin = Api.CurrentSession?.User?.Roles.Contains("tenant.admin", StringComparer.OrdinalIgnoreCase) == true;
+        if (await Api.GetPreferencesAsync() is { } prefs)
+        {
+            _language = prefs.Language ?? string.Empty;
+            _region = prefs.Region ?? string.Empty;
+            _tenantLanguage = prefs.TenantDefaultLanguage;
+            _tenantRegion = prefs.TenantDefaultRegion;
+            if (prefs.Languages.Count > 0)
+            {
+                _languages = prefs.Languages;
+            }
+        }
+    }
+
+    private string Example()
+    {
+        // Shows what the choice looks like before it is saved, so the user sees what they get
+        var profile = RegionService.Profiles.FirstOrDefault(p => p.Code == (string.IsNullOrEmpty(_region) ? _tenantRegion : _region)) ?? RegionService.International;
+        var preview = new RegionService();
+        preview.SetRegion(profile.Code);
+        return I18n.Format("ui.settings.example", preview.FormatDate(new DateOnly(2026, 12, 31)), preview.FormatNumber(1234.56m, 2));
+    }
+
+    private string LanguageName(string code) => I18n.T($"ui.settings.lang.{code}", code);
+
+    private static string RegionName(string code) =>
+        RegionService.Profiles.FirstOrDefault(p => p.Code == code)?.Label ?? code;
+
+    private async Task SaveMineAsync()
+    {
+        var saved = await Api.SavePreferencesAsync(
+            string.IsNullOrEmpty(_language) ? null : _language,
+            string.IsNullOrEmpty(_region) ? null : _region);
+        Report(saved is not null);
+    }
+
+    private async Task SaveTenantAsync() => Report(await Api.SaveTenantPreferencesAsync(_tenantLanguage, _tenantRegion));
+
+    private void Report(bool ok)
+    {
+        _isError = !ok;
+        _message = I18n.T(ok ? "ui.settings.saved" : "ui.settings.failed");
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLocaleChanged -= StateHasChanged;
+        Region.OnRegionChanged -= StateHasChanged;
+    }
+}

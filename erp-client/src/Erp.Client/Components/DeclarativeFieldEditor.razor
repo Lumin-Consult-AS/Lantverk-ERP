@@ -1,6 +1,7 @@
 @using System.Globalization
 @inject I18nService I18n
 @inject ErpApiClient Api
+@inject RegionService Region
 
 @if (ClientFieldValidator.IsFieldVisible(Field, RecordFields))
 {
@@ -51,6 +52,43 @@
                     <MudSelectItem T="string" Value="@opt.Value">@opt.Label</MudSelectItem>
                 }
             </MudSelect>
+        }
+        else if (Field.Type == ClientFieldType.Date)
+        {
+            <MudTextField T="string"
+                          Label="@DisplayLabel"
+                          Value="@GetStringValue()"
+                          ValueChanged="@OnStringChanged"
+                          Required="@IsRequired"
+                          ReadOnly="@IsReadOnly"
+                          Placeholder="@Region.Current.DateFormat"
+                          Adornment="Adornment.End"
+                          AdornmentIcon="@Icons.Material.Filled.CalendarMonth"
+                          OnAdornmentClick="@OpenPickerAsync"
+                          Error="@(!string.IsNullOrEmpty(ValidationError))"
+                          ErrorText="@ValidationError"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense" />
+            <MudDatePicker @ref="_picker"
+                           PickerVariant="PickerVariant.Dialog"
+                           Date="@PickerDate"
+                           DateChanged="@OnPickerChanged"
+                           FirstDayOfWeek="@Region.Current.FirstDayOfWeek"
+                           Class="d-none" />
+        }
+        else if (Field.Type == ClientFieldType.Decimal || Field.Type == ClientFieldType.Integer)
+        {
+            <MudTextField T="string"
+                          Label="@DisplayLabel"
+                          Value="@GetStringValue()"
+                          ValueChanged="@OnStringChanged"
+                          Required="@IsRequired"
+                          ReadOnly="@IsReadOnly"
+                          Error="@(!string.IsNullOrEmpty(ValidationError))"
+                          ErrorText="@ValidationError"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Style="text-align:right" />
         }
         else if (Field.Type == ClientFieldType.Text)
         {
@@ -147,19 +185,42 @@
         }
     }
 
+    private MudDatePicker? _picker;
+
+    // The value as the region writes it. Text that could not be read stays as the user typed it (and is refused on save).
     private string GetStringValue()
     {
         if (RecordFields.TryGetValue(ExposedName, out var val) && val is not null)
         {
-            return I18nService.UnwrapDisplayString(val);
+            return Region.Display(Field, val);
         }
 
         if (Field.DefaultValue is not null)
         {
-            return I18nService.UnwrapDisplayString(Field.DefaultValue);
+            return Region.Display(Field, Field.DefaultValue);
         }
 
         return string.Empty;
+    }
+
+    private DateTime? PickerDate =>
+        RecordFields.TryGetValue(ExposedName, out var val) && val is not null
+        && DateOnly.TryParseExact(I18nService.UnwrapDisplayString(val), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+            ? date.ToDateTime(TimeOnly.MinValue)
+            : null;
+
+    private async Task OpenPickerAsync()
+    {
+        if (!IsReadOnly && _picker is not null)
+        {
+            await _picker.OpenAsync();
+        }
+    }
+
+    private async Task OnPickerChanged(DateTime? picked)
+    {
+        RecordFields[ExposedName] = picked is { } d ? RegionService.ToIso(DateOnly.FromDateTime(d)) : null;
+        await OnValueChanged.InvokeAsync();
     }
 
     private bool GetBoolValue()
@@ -180,11 +241,16 @@
         {
             RecordFields[ExposedName] = null;
         }
-        else if (Field.Type == ClientFieldType.Integer && long.TryParse(newValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l))
+        else if (Field.Type == ClientFieldType.Date && Region.TryParseDate(newValue, out var date))
         {
-            RecordFields[ExposedName] = l;
+            // Whatever the region writes, the API gets ISO 8601
+            RecordFields[ExposedName] = RegionService.ToIso(date);
         }
-        else if (Field.Type == ClientFieldType.Decimal && decimal.TryParse(newValue, NumberStyles.Number, CultureInfo.InvariantCulture, out var d))
+        else if (Field.Type == ClientFieldType.Integer && Region.TryParseNumber(newValue, out var whole) && whole == decimal.Truncate(whole))
+        {
+            RecordFields[ExposedName] = (long)whole;
+        }
+        else if (Field.Type == ClientFieldType.Decimal && Region.TryParseNumber(newValue, out var d))
         {
             RecordFields[ExposedName] = d;
         }

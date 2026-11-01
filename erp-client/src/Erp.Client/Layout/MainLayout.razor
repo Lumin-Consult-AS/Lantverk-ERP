@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
 @inject ErpApiClient Api
 @inject I18nService I18n
+@inject RegionService Region
 @implements IDisposable
 
 <MudThemeProvider />
@@ -22,12 +23,10 @@
                 @Api.CurrentSession.Tenant.Name · @(Api.CurrentSession.Company?.Name ?? "-")
             </MudChip>
         }
-        <MudButtonGroup Color="Color.Inherit" Variant="Variant.Outlined" Size="Size.Small">
-            <MudButton OnClick="@(() => SwitchLanguageAsync("nb"))"
-                       Disabled="@(I18n.CurrentLocale == "nb")">NB</MudButton>
-            <MudButton OnClick="@(() => SwitchLanguageAsync("en"))"
-                       Disabled="@(I18n.CurrentLocale == "en")">EN</MudButton>
-        </MudButtonGroup>
+        <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                       Color="Color.Inherit"
+                       Href="/settings"
+                       title="@I18n.T("ui.nav.settings")" />
     </MudAppBar>
 
     <MudDrawer @bind-Open="_drawerOpen" Elevation="2" ClipMode="DrawerClipMode.Always">
@@ -49,6 +48,9 @@
             </MudNavLink>
             <MudNavLink Href="/schedules" Icon="@Icons.Material.Filled.Schedule">
                 @I18n.T("ui.nav.schedules")
+            </MudNavLink>
+            <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings">
+                @I18n.T("ui.nav.settings")
             </MudNavLink>
             <MudDivider Class="my-2" />
             <MudText Typo="Typo.caption" Class="px-4 py-1 mud-text-secondary">
@@ -78,6 +80,7 @@
     {
         Api.OnStateChanged += HandleStateChanged;
         I18n.OnLocaleChanged += StateHasChanged;
+        Region.OnRegionChanged += StateHasChanged;
 
         if (Api.CurrentAuth is null)
         {
@@ -103,15 +106,11 @@
             .ToList();
     }
 
-    private async Task SwitchLanguageAsync(string locale)
-    {
-        await Api.SwitchLocaleAsync(locale);
-    }
-
     public void Dispose()
     {
         Api.OnStateChanged -= HandleStateChanged;
         I18n.OnLocaleChanged -= StateHasChanged;
+        Region.OnRegionChanged -= StateHasChanged;
     }
 }
 

@@ -11,6 +11,7 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 var apiBaseAddress = builder.Configuration["ApiBaseUrl"] ?? builder.HostEnvironment.BaseAddress;
 builder.Services.AddScoped(_ => new HttpClient { BaseAddress = new Uri(apiBaseAddress) });
 builder.Services.AddSingleton<I18nService>();
+builder.Services.AddSingleton<RegionService>();
 builder.Services.AddScoped<ErpApiClient>();
 builder.Services.AddMudServices();
 

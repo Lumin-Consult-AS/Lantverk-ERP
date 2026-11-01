@@ -11,5 +11,11 @@ public sealed class User : EntityBase
     public List<string> Roles { get; set; } = [];
     public List<Guid> AccessibleCompanyIds { get; set; } = [];
     public bool IsActive { get; set; } = true;
+
+    /// <summary>The user's language (a code such as nb or en), or null to use the tenant's default.</summary>
+    public string? Language { get; set; }
+
+    /// <summary>The user's region (a country code such as NO), or null to use the tenant's default.</summary>
+    public string? Region { get; set; }
 }
 

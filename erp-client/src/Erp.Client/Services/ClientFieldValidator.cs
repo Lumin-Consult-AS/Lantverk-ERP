@@ -66,6 +66,21 @@ public static class ClientFieldValidator
 
         var strVal = UnwrapToString(rawVal);
 
+        // A date or a number the user typed that the region's reader could not make sense of stays as text: it must not be sent
+        if (rawVal is string typed)
+        {
+            if (field.Type == ClientFieldType.Date && !DateOnly.TryParseExact(typed, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+            {
+                return i18n?.Format("ui.validation.date", label) ?? $"Feltet '{label}' er ikke en gyldig dato.";
+            }
+
+            if (field.Type is ClientFieldType.Decimal or ClientFieldType.Integer or ClientFieldType.Money
+                && !decimal.TryParse(typed, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out _))
+            {
+                return i18n?.Format("ui.validation.number", label) ?? $"Feltet '{label}' er ikke et gyldig tall.";
+            }
+        }
+
         if (field.MaxLength.HasValue && strVal.Length > field.MaxLength.Value)
         {
             return i18n?.Format("ui.validation.maxLength", label, field.MaxLength.Value)
