@@ -7,4 +7,6 @@ columns:
   - startDate
   - endDate
   - payable
+  - deadline
+  - submitted
   - status

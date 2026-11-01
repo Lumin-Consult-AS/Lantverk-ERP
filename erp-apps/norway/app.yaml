@@ -27,6 +27,8 @@ enums:
   norway.vatdirection: [output, input]
   norway.vatreturnstatus: [draft, calculated]
   norway.exportstatus: [requested, done, failed]
+  norway.submissionstatus: [requested, valid, invalid, submitted, failed]
+  norway.meldingcategory: [alminnelig, primaernaering]
 
 objects:
   # Én post per selskap: hvilken versjon av kontoplan og MVA-koder som er lagt inn. Å opprette posten (siden «Norsk oppsett»)
@@ -58,6 +60,10 @@ objects:
         required: true
         default: true
         label: MVA-registrert
+      vatPaymentKid:
+        type: string
+        maxLength: 25
+        label: KID for MVA-betaling (fra Skatteetaten)
       contactFirstName:
         type: string
         maxLength: 100
@@ -219,6 +225,14 @@ objects:
         scale: 2
         default: 0
         label: Å betale (negativ = til gode)
+      deadline:
+        type: date
+        label: Frist for MVA-melding
+      submitted:
+        type: boolean
+        required: true
+        default: false
+        label: Levert til Skatteetaten
       status:
         type: enum
         of: norway.vatreturnstatus
@@ -262,6 +276,52 @@ objects:
         required: true
         scale: 2
         label: Avgift
+
+  # MVA-melding i Skatteetatens format (mvaMeldingDto v1.0), laget fra et beregnet MVA-oppgjør og sjekket før den kan sendes. Å opprette
+  # posten ber om en ny melding; filen kan lastes ned og leveres i Altinn. Innsending fra systemet kommer med adgang (B8).
+  norway.vatsubmission:
+    label: MVA-melding
+    fields:
+      vatReturn:
+        type: reference
+        to: norway.vatreturn
+        required: true
+        onDelete: cascade
+        label: MVA-oppgjør
+      category:
+        type: enum
+        of: norway.meldingcategory
+        required: true
+        default: alminnelig
+        label: Meldingskategori
+      status:
+        type: enum
+        of: norway.submissionstatus
+        required: true
+        default: requested
+        label: Status
+      reference:
+        type: string
+        maxLength: 40
+        label: Regnskapssystemets referanse
+      totalAmount:
+        type: integer
+        label: Å betale i hele kroner (negativ = til gode)
+      file:
+        type: uuid
+        label: Fil
+      fileName:
+        type: string
+        maxLength: 200
+        label: Filnavn
+      message:
+        type: string
+        maxLength: 4000
+        label: Kontroll
+      altinnReference:
+        type: string
+        maxLength: 200
+        label: Referanse i Altinn
 
   # KID for kundeposter: hver åpne kundepost (faktura) får en KID som kunden oppgir ved betaling. Tallet er et hullfritt løpenummer
   # med MOD10-kontrollsiffer; den ferdige KID-en settes som betalingsreferanse på den åpne posten.
@@ -362,10 +422,12 @@ events:
   publishes:
     - norway.setup.requested@1
     - norway.saftexport.requested@1
+    - norway.vatsubmission.requested@1
   subscribes:
     - core.fiscalyear.created@1: OnFiscalYearCreated
     - norway.setup.requested@1: OnSetupRequested
     - norway.saftexport.requested@1: OnSaftExportRequested
+    - norway.vatsubmission.requested@1: OnVatSubmissionRequested
     - finance.journal.posted@1: OnJournalPosted
 
 pages:
@@ -374,6 +436,7 @@ pages:
   - pages/vatrate-list.yaml
   - pages/vatentry-list.yaml
   - pages/vatreturn-list.yaml
+  - pages/vatsubmission-list.yaml
   - pages/vatreturn-card.yaml
   - pages/saftexport-list.yaml
   - extend: finance.account-card
@@ -387,6 +450,7 @@ permissionSets:
       norway.vatcode: [read, create, update, delete]
       norway.vatrate: [read, create, update, delete]
       norway.saftexport: [read, create, delete]
+      norway.vatsubmission: [read, create, delete]
       norway.kid: [read]
   - id: norway.reader
     label: Norge-pakken – lesetilgang
@@ -398,6 +462,7 @@ permissionSets:
       norway.vatreturn: [read]
       norway.vatreturnline: [read]
       norway.saftexport: [read]
+      norway.vatsubmission: [read]
       norway.kid: [read]
   - id: norway.bookkeeper
     label: Norge-pakken – MVA
@@ -409,4 +474,20 @@ permissionSets:
       norway.vatreturn: [read, create, update, delete, post]
       norway.vatreturnline: [read, create, update, delete]
       norway.saftexport: [read, create, delete]
+      norway.vatsubmission: [read, create, delete]
       norway.kid: [read, create, update]
+
+# Fristene for MVA-meldingen. Et oppgjør er «levert» når det er sendt (siden «MVA-melding») eller krysset av for hånd.
+attention:
+  - id: norway.vatreturn.overdue
+    label: MVA-melding som er forfalt
+    source: { query: norway.vatreturn, filter: { submitted: false, deadline: { lt: "{today}" } } }
+    severity: action
+    audience: { permission: norway.vatreturn.post }
+    action: { page: norway.vatreturn-list }
+  - id: norway.vatreturn.due
+    label: MVA-melding som skal leveres
+    source: { query: norway.vatreturn, filter: { submitted: false, deadline: { ge: "{today}" } } }
+    severity: warning
+    audience: { permission: norway.vatreturn.post }
+    action: { page: norway.vatreturn-list }

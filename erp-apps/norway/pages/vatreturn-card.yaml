@@ -8,6 +8,8 @@ groups:
       - name
       - startDate
       - endDate
+      - deadline
+      - submitted
       - status
   - label: norway.card.result
     fields:
